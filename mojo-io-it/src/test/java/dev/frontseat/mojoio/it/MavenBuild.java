@@ -37,7 +37,7 @@ final class MavenBuild {
     static MavenBuild checkout(String project, String testName, String checkout, Path cacheDir) {
         Path source = Path.of(System.getProperty("mojoio.it.projects")).resolve(project);
         Path target = Path.of(System.getProperty("mojoio.it.work")).resolve(testName).resolve(checkout);
-        copyTree(source, target);
+        copyTree(source, target, false);
         return new MavenBuild(target, cacheDir);
     }
 
@@ -61,6 +61,21 @@ final class MavenBuild {
     }
 
     Result run(String... goals) {
+        Result result = runAllowingFailure(goals);
+        if (result.exitCode() != 0) {
+            fail("Maven failed (" + result.exitCode() + "): " + String.join(" ", goals) + "\n" + result.log());
+        }
+        return result;
+    }
+
+    /** Copies every {@code target/} directory of {@code modules} from another checkout into this one. */
+    void copyTargetsFrom(MavenBuild other, String... modules) {
+        for (String module : modules) {
+            copyTree(other.dir().resolve(module).resolve("target"), dir().resolve(module).resolve("target"), true);
+        }
+    }
+
+    Result runAllowingFailure(String... goals) {
         List<String> cmd = new ArrayList<>();
         cmd.add(mavenHome().resolve("bin").resolve("mvn").toString());
         cmd.add("-B");
@@ -89,11 +104,7 @@ final class MavenBuild {
                 fail("Expected to fork Maven " + expected + " but got:\n"
                         + output.lines().filter(l -> l.startsWith("Apache Maven")).findFirst().orElse(output));
             }
-            Result result = new Result(process.exitValue(), output);
-            if (result.exitCode != 0) {
-                fail("Maven failed (" + result.exitCode + "): " + String.join(" ", goals) + "\n" + output);
-            }
-            return result;
+            return new Result(process.exitValue(), output);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         } catch (InterruptedException e) {
@@ -129,13 +140,13 @@ final class MavenBuild {
         }
     }
 
-    private static void copyTree(Path source, Path target) {
+    private static void copyTree(Path source, Path target, boolean includeTarget) {
         deleteTree(target);
         try (Stream<Path> files = Files.walk(source)) {
             for (Path p : (Iterable<Path>) files::iterator) {
                 Path rel = source.relativize(p);
-                if (rel.toString().equals("target") || rel.toString().contains("/target")
-                        || rel.toString().startsWith("target/")) {
+                if (!includeTarget && (rel.toString().equals("target") || rel.toString().contains("/target")
+                        || rel.toString().startsWith("target/"))) {
                     continue;
                 }
                 Path dest = target.resolve(rel.toString());

@@ -1,18 +1,16 @@
 package dev.frontseat.mojoio.extension.descriptor;
 
-import dev.frontseat.mojoio.cache.AntPattern;
 import dev.frontseat.mojoio.cache.FileTrees;
 import dev.frontseat.mojoio.extension.ExecutionContext;
 import dev.frontseat.mojoio.extension.NotCacheableException;
-import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.apache.maven.model.Resource;
 
-/** Built-in output kinds. */
+/** Built-in output kinds (see docs/plugin-io.md). */
 public final class Outputs {
 
     private static final Pattern JAVAAGENT_DESTFILE = Pattern.compile("-javaagent:[^\\s]*?[=,]destfile=([^,\\s\"]+)");
@@ -20,44 +18,42 @@ public final class Outputs {
     private Outputs() {}
 
     /**
-     * Files under the directory named by {@code parameter} matching any of {@code includes}. Outputs
-     * are declared by pattern rather than diffed, because a mojo that finds its outputs up to date
-     * (e.g. the compiler on an unchanged tree) writes nothing, yet those files are still its outputs.
+     * Files under the directory named by {@code parameter} matching any of {@code includes}. Outputs are
+     * declared rather than diffed, because a mojo that finds its outputs up to date (e.g. the compiler on
+     * an unchanged tree) writes nothing, yet those files are still its outputs.
      */
     public static OutputSpec directory(String parameter, String... includes) {
-        return (ctx, out) -> {
+        return ctx -> {
+            List<ResolvedOutput> result = new ArrayList<>();
             for (Path dir : ctx.parameterPaths(parameter)) {
-                for (Path f : FileTrees.listFiles(dir)) {
-                    if (AntPattern.selected(FileTrees.relative(dir, f), List.of(includes), List.of())) {
-                        put(ctx, f, out);
-                    }
-                }
+                result.add(new ResolvedOutput(parameter, dir, List.of(includes), List.of()));
             }
+            return result;
         };
     }
 
     /** What a resources mojo copies: each selected file, mapped to the output directory/targetPath. */
     public static OutputSpec copiedResources(String resourcesParameter, String outputDirectoryParameter) {
-        return (ctx, out) -> {
+        return ctx -> {
             List<Path> outDirs = ctx.parameterPaths(outputDirectoryParameter);
             if (outDirs.size() != 1) {
                 throw new NotCacheableException("expected one output directory, got " + outDirs);
             }
             Object addDefaultExcludes = ctx.parameter("addDefaultExcludes");
             boolean defaultExcludes = addDefaultExcludes == null || Boolean.parseBoolean(addDefaultExcludes.toString());
+            List<ResolvedOutput> result = new ArrayList<>();
             for (Resource r : Inputs.resourceList(ctx, resourcesParameter)) {
-                Path target = outDirs.get(0);
-                if (r.getTargetPath() != null) {
-                    target = target.resolve(r.getTargetPath());
-                }
+                Path target = r.getTargetPath() == null ? outDirs.get(0) : outDirs.get(0).resolve(r.getTargetPath());
                 Path dir = Path.of(r.getDirectory());
+                List<String> copied = new ArrayList<>();
                 for (Path f : Inputs.selectedFiles(r, defaultExcludes)) {
-                    Path copied = target.resolve(FileTrees.relative(dir, f)).normalize();
-                    if (Files.isRegularFile(copied)) {
-                        put(ctx, copied, out);
-                    }
+                    copied.add(FileTrees.relative(dir, f));
+                }
+                if (!copied.isEmpty()) {
+                    result.add(new ResolvedOutput(resourcesParameter, target.normalize(), copied, List.of()));
                 }
             }
+            return result;
         };
     }
 
@@ -66,26 +62,16 @@ public final class Outputs {
      * (JaCoCo). The test run writes them, so they are outputs of the test execution.
      */
     public static OutputSpec javaagentDestFiles(String argLineParameter) {
-        return (ctx, out) -> {
+        return ctx -> {
             Object argLine = ctx.parameter(argLineParameter);
-            if (argLine == null) {
-                return;
-            }
-            Matcher m = JAVAAGENT_DESTFILE.matcher(argLine.toString());
-            while (m.find()) {
-                Path f = Path.of(m.group(1));
-                if (Files.isRegularFile(f)) {
-                    put(ctx, f, out);
+            List<ResolvedOutput> result = new ArrayList<>();
+            if (argLine != null) {
+                Matcher m = JAVAAGENT_DESTFILE.matcher(argLine.toString());
+                while (m.find()) {
+                    result.add(new ResolvedOutput(argLineParameter, Path.of(m.group(1)), List.of(), List.of()));
                 }
             }
+            return result;
         };
-    }
-
-    private static void put(ExecutionContext ctx, Path file, Map<String, Path> out) throws NotCacheableException {
-        Path abs = file.toAbsolutePath().normalize();
-        if (!abs.startsWith(ctx.basedir())) {
-            throw new NotCacheableException("output " + abs + " is outside the project directory");
-        }
-        out.put(FileTrees.relative(ctx.basedir(), abs), abs);
     }
 }

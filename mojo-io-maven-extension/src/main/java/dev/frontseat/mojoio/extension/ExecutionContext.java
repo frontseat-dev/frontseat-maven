@@ -20,14 +20,29 @@ public final class ExecutionContext {
     private final MojoExecution execution;
     private final PathNormalizer normalizer;
     private final PluginParameterExpressionEvaluator evaluator;
+    private final boolean analysisOnly;
 
     public ExecutionContext(MavenSession session, MavenProject project, MojoExecution execution,
                             PathNormalizer normalizer) {
+        this(session, project, execution, normalizer, false);
+    }
+
+    /**
+     * @param analysisOnly the mojo will not run and dependencies are not resolved (graph export):
+     *                     inputs that need resolution are described, not listed
+     */
+    public ExecutionContext(MavenSession session, MavenProject project, MojoExecution execution,
+                            PathNormalizer normalizer, boolean analysisOnly) {
+        this.analysisOnly = analysisOnly;
         this.session = session;
         this.project = project;
         this.execution = execution;
         this.normalizer = normalizer;
         this.evaluator = new PluginParameterExpressionEvaluator(session, execution);
+    }
+
+    public boolean analysisOnly() {
+        return analysisOnly;
     }
 
     public MavenSession session() {

@@ -2,140 +2,132 @@ package dev.frontseat.mojoio.extension.descriptor;
 
 import dev.frontseat.mojoio.cache.AntPattern;
 import dev.frontseat.mojoio.cache.FileTrees;
-import dev.frontseat.mojoio.cache.Hashing;
 import dev.frontseat.mojoio.extension.ExecutionContext;
 import dev.frontseat.mojoio.extension.NotCacheableException;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.TreeMap;
 import org.apache.maven.model.Resource;
-import org.apache.maven.project.MavenProject;
 
-/** Built-in input kinds. */
+/** Built-in input kinds (see docs/plugin-io.md). */
 public final class Inputs {
-
-    /**
-     * {@code -D} properties that configure the build tooling rather than the build, so they never
-     * reach a filtered resource. Leaving them in would make e.g. {@code -Dmaven.repo.local} a cache miss.
-     */
-    static final Set<String> PLUMBING_PROPERTIES = Set.of(
-            "maven.repo.local", "maven.ext.class.path", "maven.multiModuleProjectDirectory", "maven.home",
-            "maven.conf", "classworlds.conf", "library.jansi.path", "style.color");
 
     private Inputs() {}
 
-    /**
-     * Content of the files or directory trees named by a parameter (a path, or a list of paths).
-     * Order is kept; each path is recorded relative to the project or root, plus its content hash.
-     */
+    /** Files or directory trees named by a parameter (a path, or a list of paths). */
     public static InputSpec files(String parameter) {
-        return (ctx, key) -> {
-            int i = 0;
-            for (Path p : ctx.parameterPaths(parameter)) {
-                key.add("input." + parameter + "[" + i++ + "]",
-                        ctx.normalizer().normalize(p.toString()) + " " + FileTrees.hash(p));
-            }
-        };
+        return ctx -> List.of(ResolvedInput.files(parameter, ctx.parameterPaths(parameter)));
     }
 
     /**
-     * A classpath parameter. Elements are hashed by content only (not location), in order, so a
-     * reactor module's {@code target/classes} and the same classes elsewhere hash alike.
-     *
-     * <p>The mojo's own output directory is skipped: Maven puts it on the classpath (javac's
-     * {@code compilePath} starts with {@code target/classes}), which would make the key depend on
-     * the previous run's outputs.
+     * A classpath parameter, compared by content in order. The mojo's own output directory is skipped:
+     * Maven puts it on the classpath (javac's {@code compilePath} starts with {@code target/classes}),
+     * which would make the key depend on the previous run's outputs.
      */
     public static InputSpec classpath(String parameter, String ownOutputParameter) {
-        return (ctx, key) -> {
-            List<Path> own = ownOutputParameter == null ? List.of() : ctx.parameterPaths(ownOutputParameter);
-            List<String> hashes = new ArrayList<>();
-            for (Path p : ctx.parameterPaths(parameter)) {
-                if (own.contains(p)) {
-                    hashes.add("self");
-                    continue;
-                }
-                hashes.add((Files.isDirectory(p) ? "dir:" : "file:") + FileTrees.hashClasspathEntry(p));
+        return ctx -> {
+            String scope = ctx.execution().getMojoDescriptor() == null ? null
+                    : ctx.execution().getMojoDescriptor().getDependencyResolutionRequired();
+            if (ctx.analysisOnly()) {
+                return List.of(ResolvedInput.classpath(parameter, List.of(), scope));
             }
-            key.add("input." + parameter, String.join(",", hashes));
+            List<Path> own = ownOutputParameter == null ? List.of() : ctx.parameterPaths(ownOutputParameter);
+            List<Path> paths = new ArrayList<>(ctx.parameterPaths(parameter));
+            paths.removeAll(own);
+            return List.of(ResolvedInput.classpath(parameter, paths, scope));
         };
     }
 
     /** The project's test classpath, for mojos that build it internally (surefire). */
     public static InputSpec testClasspath() {
-        return (ctx, key) -> {
-            List<String> hashes = new ArrayList<>();
+        return ctx -> {
+            if (ctx.analysisOnly()) {
+                return List.of(ResolvedInput.classpath("testClasspath", List.of(), "test"));
+            }
+            List<Path> paths = new ArrayList<>();
             try {
                 for (String element : ctx.project().getTestClasspathElements()) {
-                    Path p = Path.of(element);
-                    hashes.add((Files.isDirectory(p) ? "dir:" : "file:") + FileTrees.hashClasspathEntry(p));
+                    paths.add(Path.of(element));
                 }
             } catch (Exception e) {
                 throw new NotCacheableException("cannot compute test classpath: " + e.getMessage(), e);
             }
-            key.add("input.testClasspath", String.join(",", hashes));
+            return List.of(ResolvedInput.classpath("testClasspath", paths, "test"));
         };
     }
 
     /**
      * The current value of a project property whose name is given by a parameter (falling back to
-     * {@code defaultName}). Used for mojos that read-modify-write a property, like
+     * {@code defaultName}). For mojos that read-modify-write a property, like
      * {@code jacoco:prepare-agent} prepending to {@code argLine}.
      */
     public static InputSpec projectPropertyNamedBy(String parameter, String defaultName) {
-        return (ctx, key) -> {
+        return ctx -> {
             Object configured = parameter == null ? null : ctx.parameter(parameter);
             String name = configured == null || configured.toString().isBlank() ? defaultName : configured.toString();
             String value = ctx.project().getProperties().getProperty(name);
-            key.add("input.property." + name, ctx.normalizer().normalize(value));
+            return List.of(ResolvedInput.value("property." + name, ctx.normalizer().normalize(value)));
         };
     }
 
+    /** Expressions resource filtering substitutes, with the default delimiters {@code ${...}} and {@code @...@}. */
+    private static final java.util.regex.Pattern FILTER_EXPRESSION =
+            java.util.regex.Pattern.compile("\\$\\{([^}\\s]+)}|@([A-Za-z0-9_.\\-]+)@");
+
     /**
-     * Resource sets (a {@code List<Resource>} parameter): for each resource, its settings and the
-     * content of the files it selects. If any resource is filtered, the values filtering can read are
-     * inputs too: the project's coordinates, its properties and the {@code -D} user properties.
-     * System properties are deliberately not hashed (they would make every machine miss).
+     * Resource sets (a {@code List<Resource>} parameter): for each resource, its settings and the files it
+     * selects. For filtered resources, every expression the files actually reference is an input too,
+     * evaluated the way filtering evaluates it (project model, properties, user and system properties).
+     * Hashing only referenced expressions keeps keys stable across Maven-internal properties.
      */
     public static InputSpec resources(String parameter) {
-        return (ctx, key) -> {
-            List<Resource> resources = resourceList(ctx, parameter);
-            boolean filtering = false;
+        return ctx -> {
+            List<ResolvedInput> result = new ArrayList<>();
+            java.util.TreeSet<String> expressions = new java.util.TreeSet<>();
             int i = 0;
-            for (Resource r : resources) {
-                Path dir = Path.of(r.getDirectory());
-                StringBuilder files = new StringBuilder();
-                for (Path f : selectedFiles(r, true)) {
-                    files.append(FileTrees.relative(dir, f)).append('=').append(Hashing.sha256(f)).append(';');
-                }
-                key.add("input." + parameter + "[" + i++ + "]",
-                        ctx.normalizer().normalize(r.getDirectory())
-                                + " target=" + r.getTargetPath()
-                                + " filtering=" + r.isFiltering()
-                                + " includes=" + r.getIncludes() + " excludes=" + r.getExcludes()
-                                + " files=" + Hashing.sha256(files.toString()));
-                filtering |= r.isFiltering();
-            }
-            if (filtering) {
-                MavenProject p = ctx.project();
-                key.add("input.filtering.project",
-                        p.getGroupId() + ":" + p.getArtifactId() + ":" + p.getVersion() + " name=" + p.getName()
-                                + " description=" + p.getDescription());
-                key.add("input.filtering.properties", sortedNormalized(ctx, p.getProperties()));
-                Map<Object, Object> user = new TreeMap<>();
-                ctx.session().getUserProperties().forEach((k, v) -> {
-                    String name = String.valueOf(k);
-                    if (!name.startsWith("mojoio.") && !PLUMBING_PROPERTIES.contains(name)) {
-                        user.put(name, v);
+            for (Resource r : resourceList(ctx, parameter)) {
+                List<String> excludes = new ArrayList<>(r.getExcludes());
+                excludes.addAll(AntPattern.DEFAULT_EXCLUDES);
+                String name = parameter + "[" + i++ + "]";
+                result.add(ResolvedInput.files(name, Path.of(r.getDirectory()), r.getIncludes(), excludes));
+                result.add(ResolvedInput.value(name + ".settings", "target=" + r.getTargetPath()
+                        + " filtering=" + r.isFiltering()));
+                if (r.isFiltering()) {
+                    for (Path f : selectedFiles(r, true)) {
+                        expressions.addAll(referencedExpressions(f));
                     }
-                });
-                key.add("input.filtering.userProperties", sortedNormalized(ctx, user));
+                }
             }
+            for (String expression : expressions) {
+                Object value;
+                try {
+                    value = ctx.evaluateExpression("${" + expression + "}");
+                } catch (NotCacheableException e) {
+                    value = "<unresolved>";
+                }
+                result.add(ResolvedInput.value("filtering.${" + expression + "}",
+                        value == null ? null : ctx.normalizer().normalize(String.valueOf(value))));
+            }
+            return result;
         };
+    }
+
+    static java.util.Set<String> referencedExpressions(Path file) {
+        java.util.Set<String> found = new java.util.TreeSet<>();
+        String text;
+        try {
+            if (java.nio.file.Files.size(file) > 4 * 1024 * 1024) {
+                return found; // not a text resource anyone filters
+            }
+            text = new String(java.nio.file.Files.readAllBytes(file), java.nio.charset.StandardCharsets.ISO_8859_1);
+        } catch (java.io.IOException e) {
+            throw new java.io.UncheckedIOException(e);
+        }
+        java.util.regex.Matcher m = FILTER_EXPRESSION.matcher(text);
+        while (m.find()) {
+            found.add(m.group(1) != null ? m.group(1) : m.group(2));
+        }
+        return found;
     }
 
     @SuppressWarnings("unchecked")
@@ -164,11 +156,5 @@ public final class Inputs {
             }
         }
         return selected;
-    }
-
-    private static String sortedNormalized(ExecutionContext ctx, Map<Object, Object> props) {
-        TreeMap<String, String> sorted = new TreeMap<>();
-        props.forEach((k, v) -> sorted.put(String.valueOf(k), ctx.normalizer().normalize(String.valueOf(v))));
-        return Hashing.sha256(sorted.toString());
     }
 }

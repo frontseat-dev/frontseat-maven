@@ -96,15 +96,22 @@ invocations (`mvn test surefire:test`) are left alone. To turn this off, set
   Without it, classpath inputs silently covered only output directories, so a change in an upstream
   module didn't invalidate its dependents.
 - **Self-referential classpaths.** `compilePath` starts with the mojo's own `target/classes`.
-- **Unrelated `-D` flags.** Filtering hashes user properties, so build plumbing (`mojoio.*`,
-  `maven.repo.local`, …) is excluded.
+- **Unrelated properties.** Hashing *all* properties for filtered resources broke twice:
+  - unrelated `-D` flags such as `-Dmaven.repo.local` changed the key;
+  - on Maven 4, internal user properties appear between builds. Maven 4 writes
+    `.mvn/target/project-local-repo` on the first build, which turns on root detection, so
+    `session.rootDirectory` shows up on the second.
+
+  Filtering now hashes exactly the expressions the filtered files reference.
+- **Restoring `target/` isn't enough.** Without the recorded project state, a build continued from
+  restored outputs can't resolve `app → lib-core` (the artifact file is lost) and loses JaCoCo's
+  `argLine`. Hence the state files (ToolAgnosticIT).
 
 ## Known limitations of the first slice
 
 - Stale outputs: if a source is deleted, a later miss can still store the stale `.class` the compiler
   left behind. Strict mode will deal with this.
 - Toolchains are ignored. The key uses the JDK running Maven.
-- Filtering hashes project and user properties, but not system properties.
 - A remote cache would also need plugin dependencies like the JaCoCo agent jar to exist locally.
   Today that case is a miss, not a failure.
 

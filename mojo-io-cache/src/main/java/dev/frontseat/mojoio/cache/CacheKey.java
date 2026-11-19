@@ -12,7 +12,7 @@ import java.util.List;
 public final class CacheKey {
 
     /** Bump when the key layout or entry format changes incompatibly. */
-    public static final String FORMAT = "mojo-io-key-v1";
+    public static final String FORMAT = "mojo-io-key-v2";
 
     private final List<String[]> components = new ArrayList<>();
 

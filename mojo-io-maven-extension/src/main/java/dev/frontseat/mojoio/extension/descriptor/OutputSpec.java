@@ -2,15 +2,11 @@ package dev.frontseat.mojoio.extension.descriptor;
 
 import dev.frontseat.mojoio.extension.ExecutionContext;
 import dev.frontseat.mojoio.extension.NotCacheableException;
-import java.nio.file.Path;
-import java.util.Map;
+import java.util.List;
 
-/**
- * A declared output of a mojo execution. Collected after a cache-miss execution, as a map from path
- * relative to the project base directory to the file on disk.
- */
+/** A declared output kind. Resolves to neutral {@link ResolvedOutput}s, before or after the mojo runs. */
 @FunctionalInterface
 public interface OutputSpec {
 
-    void collect(ExecutionContext ctx, Map<String, Path> out) throws NotCacheableException;
+    List<ResolvedOutput> resolve(ExecutionContext ctx) throws NotCacheableException;
 }
