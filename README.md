@@ -24,17 +24,44 @@ Plugins can ship it, projects can override it, and Maven 4 could adopt it; see t
 
 ## Status
 
-First slice, working end to end on Maven 3.9.11 and 4.0.0-rc-7:
-
-| Goal | Inputs (besides config) | Outputs | Project state replayed |
-|---|---|---|---|
-| `resources:resources`, `resources:testResources` | selected resource files; project/user props when filtering | copied files | – |
-| `compiler:compile`, `compiler:testCompile` | source roots, classpath (by content) | `**/*.class`, generated sources | generated source root, artifact file |
-| `surefire:test` | test classpath, classes, test classes | `surefire-reports/**`, JaCoCo `destfile` | – |
-| `jacoco:prepare-agent` | current `argLine` | – | `argLine` |
+First slice, working end to end on Maven 3.9.11 and 4.0.0-rc-7. Which plugins are covered, and how
+well, is tracked in the [compatibility registry](#plugin-compatibility-registry) below.
 
 Mojos nobody declares always run normally. If anything unexpected happens while computing a key or
 storing an entry, the mojo just runs.
+
+## Plugin compatibility registry
+
+**Statuses:**
+- ✅ **verified**: declared, and exercised end to end by the integration tests on both Maven lines.
+- 🟡 **declared**: a declaration exists and every parameter it references exists in the listed
+  versions (checked against each version's `plugin.xml`), but there's no end-to-end IT for it.
+- ⛔ **not cacheable**: has side effects outside the project, so it always runs, by design.
+- ➖ **not yet**: no declaration, so it always runs.
+
+| Plugin | Goal | Status | IT-verified version | Parameters checked in | Restores | Notes |
+|---|---|---|---|---|---|---|
+| `maven-resources-plugin` | `resources`, `testResources` | ✅ | 3.3.1 | 3.1.0, 3.2.0, 3.3.0, 3.3.1, 4.0.0-beta-1 | copied files | Filtering hashes project + `-D` properties, not system properties or env. `${maven.build.timestamp}` in a filtered file means it misses every time. |
+| `maven-compiler-plugin` | `compile`, `testCompile` | ✅ | 3.13.0 | 3.8.1, 3.10.1, 3.11.0, 3.12.1, 3.13.0, 3.14.0, 4.0.0-beta-2 | classes, generated sources, source root, artifact file | Configuring `annotationProcessorPaths` makes it uncacheable (unsupported parameter type). Toolchains are not in the key. |
+| `maven-surefire-plugin` | `test` | ✅ | 3.5.2 | 2.22.2, 3.0.0, 3.2.5, 3.5.2, 3.5.4 | reports, JaCoCo `destfile` | Tests that use the network, a DB, env vars or files outside the project get cached too: override with `.mvn/plugin-io/`. With `testFailureIgnore`, failures are cached. |
+| `jacoco-maven-plugin` | `prepare-agent` | ✅ | 0.8.12 | 0.8.7, 0.8.10, 0.8.12, 0.8.13, 0.8.14 | `argLine` | A hit requires the agent jar in the local repository; otherwise it counts as a miss. |
+| `jacoco-maven-plugin` | `report` | ➖ | | | | Next candidate: inputs `jacoco.exec` + classes, output `site/jacoco`. |
+| `maven-jar-plugin` | `jar` | ➖ | | | | Runs, but cheap. Downstream modules no longer miss when it re-packs (archives are hashed by entries, not timestamps). |
+| `maven-failsafe-plugin` | `integration-test`, `verify` | ➖ | | | | Same shape as surefire; usually needs a per-project decision. |
+| `maven-source-plugin` | `jar` | ➖ | | | | Forks a lifecycle: skipped by design today. `jar-no-fork` is the candidate. |
+| `maven-javadoc-plugin` | `javadoc`, `jar` | ➖ | | | | |
+| `maven-clean-plugin` | `clean` | ⛔ | | | | Deletes outputs; nothing to cache. |
+| `maven-install-plugin` | `install` | ⛔ | | | | Writes to the local repository (outside the project). |
+| `maven-deploy-plugin` | `deploy` | ⛔ | | | | Talks to a remote repository. |
+
+Version support is **not enforced at runtime** yet: a built-in declaration applies to any version of
+its plugin. A plugin's own `META-INF/maven/plugin-io.xml` and a project's `.mvn/plugin-io/` override
+the built-in declarations. To add a row, add the declaration to `builtin-plugin-io.xml`, check its
+parameters against the plugin versions, and add an IT before marking it ✅.
+
+**Tip:** set `project.build.outputTimestamp` (reproducible builds) in your projects. Frontseat
+doesn't need it, but it makes the jars themselves identical across builds, which a shared or remote
+cache will benefit from. Maven 4 sets a default.
 
 ## Tooling: mise
 

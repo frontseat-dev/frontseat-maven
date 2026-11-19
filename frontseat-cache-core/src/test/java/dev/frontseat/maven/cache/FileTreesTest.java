@@ -38,4 +38,28 @@ class FileTreesTest {
         Files.writeString(f, content);
         return root;
     }
+
+    @Test
+    void archivesHashByEntriesNotTimestamps(@TempDir Path tmp) throws Exception {
+        Path a = jar(tmp.resolve("a.jar"), 1_000_000L, "x/A.class", "B.class");
+        Path b = jar(tmp.resolve("b.jar"), 2_000_000_000L, "B.class", "x/A.class"); // other time and order
+        assertNotEquals(Hashing.sha256(a), Hashing.sha256(b));
+        assertEquals(FileTrees.hashClasspathEntry(a), FileTrees.hashClasspathEntry(b));
+
+        Path c = jar(tmp.resolve("c.jar"), 1_000_000L, "x/A.class", "C.class");
+        assertNotEquals(FileTrees.hashClasspathEntry(a), FileTrees.hashClasspathEntry(c));
+    }
+
+    private static Path jar(Path file, long time, String... names) throws Exception {
+        try (java.util.zip.ZipOutputStream out = new java.util.zip.ZipOutputStream(Files.newOutputStream(file))) {
+            for (String name : names) {
+                java.util.zip.ZipEntry e = new java.util.zip.ZipEntry(name);
+                e.setTime(time);
+                out.putNextEntry(e);
+                out.write(("content of " + name.replace("C", "B")).getBytes());
+                out.closeEntry();
+            }
+        }
+        return file;
+    }
 }

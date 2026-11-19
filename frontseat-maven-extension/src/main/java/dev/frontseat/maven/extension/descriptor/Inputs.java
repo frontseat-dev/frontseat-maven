@@ -59,7 +59,7 @@ public final class Inputs {
                     hashes.add("self");
                     continue;
                 }
-                hashes.add((Files.isDirectory(p) ? "dir:" : "file:") + FileTrees.hash(p));
+                hashes.add((Files.isDirectory(p) ? "dir:" : "file:") + FileTrees.hashClasspathEntry(p));
             }
             key.add("input." + parameter, String.join(",", hashes));
         };
@@ -72,7 +72,7 @@ public final class Inputs {
             try {
                 for (String element : ctx.project().getTestClasspathElements()) {
                     Path p = Path.of(element);
-                    hashes.add((Files.isDirectory(p) ? "dir:" : "file:") + FileTrees.hash(p));
+                    hashes.add((Files.isDirectory(p) ? "dir:" : "file:") + FileTrees.hashClasspathEntry(p));
                 }
             } catch (Exception e) {
                 throw new NotCacheableException("cannot compute test classpath: " + e.getMessage(), e);
