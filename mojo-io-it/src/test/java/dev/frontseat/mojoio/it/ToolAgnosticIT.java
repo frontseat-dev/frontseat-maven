@@ -82,9 +82,11 @@ class ToolAgnosticIT {
         assertEquals("{projectRoot}/target/mojo-io/state/maven-compiler-plugin-compile-default-compile.state",
                 compile.get("stateFile").asText());
 
+        assertEquals("carry", compile.get("stamping").asText());
+        assertEquals("exact", execution(app, "test").get("stamping").asText());
         JsonNode jar = execution(app, "jar");
-        assertFalse(jar.get("cacheable").asBoolean());
-        assertEquals("no plugin-io declaration", jar.get("reason").asText());
+        assertTrue(jar.get("cacheable").asBoolean());
+        assertEquals("{projectRoot}/target/app-1.0.0-SNAPSHOT.jar", jar.get("outputs").get(0).get("path").asText());
         assertEquals(build.dir().toAbsolutePath().normalize().toString(), graph.get("workspaceRoot").asText());
         assertNotEquals("", graph.get("maven").asText());
     }

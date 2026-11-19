@@ -57,13 +57,14 @@ declarations only need to cover what that hash can't see:
 | `<outputs>` | Files the mojo produces. They're declared rather than diffed, because a mojo that finds its outputs up to date writes nothing. |
 | `<ignoredParameters>` | Parameters that can't change outputs: logging, process plumbing, and parameters already hashed by content. Maven objects (`project`, `session`, `mojoExecution`, …) are always ignored. |
 | `cacheable="false" reason="…"` | The mojo has effects that can't be captured: system properties, static state, the network, files outside the project. A reason is required. |
+| `stamping="exact\|carry"` | Whether the mojo may act on stamp values such as the project version (`exact`, default) or only copies them into outputs (`carry`). See [versioning](versioning.md). |
 | `prerequisitePhase` | When the goal is invoked directly (`mvn surefire:test`), this phase runs or is restored first. |
 
 ### Input kinds
 
 | Kind | Attributes | Hashes |
 |---|---|---|
-| `files` | `parameter` | Content of the files/trees a path or path-list parameter names. |
+| `files` | `parameter` or `expression` | Content of the files/trees a path or path-list parameter names, or that a Maven expression such as `${project.file}` evaluates to. |
 | `classpath` | `parameter`, `excludeParameter?` | An ordered classpath, by content not location. `excludeParameter` skips an entry, usually the mojo's own output directory. |
 | `testClasspath` | – | The project's resolved test classpath. For mojos that build it internally. |
 | `resources` | `parameter` | A `List<Resource>`: settings plus selected files. With filtering, also project coordinates, project properties and user properties. |
@@ -74,6 +75,7 @@ declarations only need to cover what that hash can't see:
 | Kind | Attributes | Collects |
 |---|---|---|
 | `directory` | `parameter`, `includes?` (default `**`) | Files under a directory parameter matching Ant patterns. |
+| `file` | `parameter`, `name` | One file in a directory parameter. `name` is a template: `{param}` is a parameter's value, `{-param}` is `-value` when not empty, e.g. `{finalName}{-classifier}.jar`. |
 | `copiedResources` | `resourcesParameter`, `outputDirectoryParameter` | The files a resources mojo copies. |
 | `javaagentDestFiles` | `parameter` | `destfile=` targets of `-javaagent:` options in a command-line parameter (coverage data). |
 

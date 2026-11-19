@@ -43,12 +43,30 @@
     <xs:attribute name="reason" type="xs:string"/>
     <!-- Phase that must have run before this goal when it is invoked directly. -->
     <xs:attribute name="prerequisitePhase" type="xs:string"/>
+    <!-- How the mojo treats stamp values (project version, build numbers):
+         exact (default): it may act on them, so they stay in the cache key;
+         carry: it only copies them into outputs (compilers, resource filtering, archivers), so they
+                are excluded from the key and rewritten in restored outputs. -->
+    <xs:attribute name="stamping" default="exact">
+      <xs:simpleType>
+        <xs:restriction base="xs:string">
+          <xs:enumeration value="exact"/>
+          <xs:enumeration value="carry"/>
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
   </xs:complexType>
 
   <xs:complexType name="Inputs">
     <xs:choice minOccurs="0" maxOccurs="unbounded">
-      <!-- Content of the files / directory trees a parameter names (a path or a list of paths). -->
-      <xs:element name="files" type="ParameterRef"/>
+      <!-- Content of the files / directory trees a parameter names (a path or a list of paths), or that
+           a Maven expression evaluates to (e.g. ${project.file}). -->
+      <xs:element name="files">
+        <xs:complexType>
+          <xs:attribute name="parameter" type="xs:string"/>
+          <xs:attribute name="expression" type="xs:string"/>
+        </xs:complexType>
+      </xs:element>
       <!-- An ordered classpath; elements hashed by content, not location. -->
       <xs:element name="classpath">
         <xs:complexType>
@@ -81,6 +99,14 @@
         <xs:complexType>
           <xs:attribute name="parameter" type="xs:string" use="required"/>
           <xs:attribute name="includes" type="xs:string" default="**"/>
+        </xs:complexType>
+      </xs:element>
+      <!-- One file in a directory parameter. name is a template: {param} is the parameter's value,
+           {-param} is "-" + value when the value is not empty (e.g. "{finalName}{-classifier}.jar"). -->
+      <xs:element name="file">
+        <xs:complexType>
+          <xs:attribute name="parameter" type="xs:string" use="required"/>
+          <xs:attribute name="name" type="xs:string" use="required"/>
         </xs:complexType>
       </xs:element>
       <!-- The files a resources mojo copies into an output directory. -->

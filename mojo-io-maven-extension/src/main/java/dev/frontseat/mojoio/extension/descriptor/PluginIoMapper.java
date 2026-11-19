@@ -14,7 +14,8 @@ final class PluginIoMapper {
 
     static MojoCacheDescriptor toDescriptor(String pluginKey, MojoIo io, String source) {
         String[] ga = pluginKey.split(":", 2);
-        MojoCacheDescriptor.Builder b = MojoCacheDescriptor.forGoal(ga[0], ga[1], io.goal()).source(source);
+        MojoCacheDescriptor.Builder b = MojoCacheDescriptor.forGoal(ga[0], ga[1], io.goal()).source(source)
+                .stampingCarry(io.stampingCarry());
         if (!io.cacheable()) {
             return b.notCacheable(io.reason()).build();
         }
@@ -37,7 +38,9 @@ final class PluginIoMapper {
 
     private static InputSpec input(IoDeclaration d) {
         return switch (d.kind()) {
-            case "files" -> Inputs.files(d.required("parameter"));
+            case "files" -> d.attribute("expression").isPresent()
+                    ? Inputs.filesAt(d.required("expression"))
+                    : Inputs.files(d.required("parameter"));
             case "classpath" -> Inputs.classpath(d.required("parameter"), d.attribute("excludeParameter").orElse(null));
             case "testClasspath" -> Inputs.testClasspath();
             case "resources" -> Inputs.resources(d.required("parameter"));
@@ -51,6 +54,7 @@ final class PluginIoMapper {
         return switch (d.kind()) {
             case "directory" -> Outputs.directory(d.required("parameter"),
                     d.attribute("includes").orElse("**").split("\\s*,\\s*"));
+            case "file" -> Outputs.file(d.required("parameter"), d.required("name"));
             case "copiedResources" -> Outputs.copiedResources(d.required("resourcesParameter"),
                     d.required("outputDirectoryParameter"));
             case "javaagentDestFiles" -> Outputs.javaagentDestFiles(d.required("parameter"));

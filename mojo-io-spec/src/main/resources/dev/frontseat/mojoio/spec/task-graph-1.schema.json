@@ -38,6 +38,7 @@
         "executionId": { "type": "string" },
         "phase": { "type": ["string", "null"], "description": "Lifecycle phase, null for goals invoked directly." },
         "declaredBy": { "type": ["string", "null"], "description": "Source of the plugin-io declaration (project file, plugin jar, built-in), null if undeclared." },
+        "stamping": { "enum": ["exact", "carry"], "description": "exact: stamp values (project version, build numbers) are inputs; carry: the execution only copies them into outputs (see docs/versioning.md)." },
         "cacheable": { "type": "boolean" },
         "reason": { "type": ["string", "null"], "description": "Why the execution is not cacheable." },
         "inputs": { "type": "array", "items": { "$ref": "#/$defs/input" } },

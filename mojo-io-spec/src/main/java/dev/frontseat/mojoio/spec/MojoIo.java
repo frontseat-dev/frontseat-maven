@@ -15,9 +15,13 @@ import java.util.Set;
  * @param inputs            declared inputs; parameters they cover are hashed by content
  * @param outputs           declared outputs
  * @param ignoredParameters parameters that cannot affect outputs (logging, process plumbing)
+ * @param stampingCarry     {@code stamping="carry"}: the mojo only copies stamp values (project version,
+ *                          build numbers) into its outputs, so they are excluded from the key and
+ *                          rewritten on restore; otherwise ({@code exact}) they stay in the key
  */
 public record MojoIo(String goal, boolean cacheable, String reason, String prerequisitePhase,
-                     List<IoDeclaration> inputs, List<IoDeclaration> outputs, Set<String> ignoredParameters) {
+                     List<IoDeclaration> inputs, List<IoDeclaration> outputs, Set<String> ignoredParameters,
+                     boolean stampingCarry) {
 
     public MojoIo {
         inputs = List.copyOf(inputs);

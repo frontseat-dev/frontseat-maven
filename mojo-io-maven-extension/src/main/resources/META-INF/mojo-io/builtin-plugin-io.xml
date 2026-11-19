@@ -7,7 +7,7 @@
 <plugin-io xmlns="urn:mojo-io:plugin-io:1.0">
 
   <plugin groupId="org.apache.maven.plugins" artifactId="maven-resources-plugin">
-    <mojo goal="resources">
+    <mojo goal="resources" stamping="carry">
       <inputs>
         <resources parameter="resources"/>
         <files parameter="filters"/>
@@ -18,7 +18,7 @@
       </outputs>
       <ignoredParameters>resources</ignoredParameters>
     </mojo>
-    <mojo goal="testResources">
+    <mojo goal="testResources" stamping="carry">
       <inputs>
         <resources parameter="resources"/>
         <files parameter="filters"/>
@@ -32,7 +32,7 @@
   </plugin>
 
   <plugin groupId="org.apache.maven.plugins" artifactId="maven-compiler-plugin">
-    <mojo goal="compile" prerequisitePhase="process-resources">
+    <mojo goal="compile" prerequisitePhase="process-resources" stamping="carry">
       <inputs>
         <files parameter="compileSourceRoots"/>
         <!-- compilePath starts with the mojo's own target/classes; hashing it would make the key
@@ -48,7 +48,7 @@
         showCompilationChanges, skipMultiThreadWarning, compilerReuseStrategy, verbose, staleMillis
       </ignoredParameters>
     </mojo>
-    <mojo goal="testCompile" prerequisitePhase="process-test-resources">
+    <mojo goal="testCompile" prerequisitePhase="process-test-resources" stamping="carry">
       <inputs>
         <files parameter="compileSourceRoots"/>
         <classpath parameter="testPath" excludeParameter="outputDirectory"/>
@@ -64,6 +64,22 @@
     </mojo>
   </plugin>
 
+  <plugin groupId="org.apache.maven.plugins" artifactId="maven-jar-plugin">
+    <!-- Packages classes plus metadata that embeds the version (pom.properties, the pom, MANIFEST.MF):
+         stamp values are rewritten inside the restored jar and in its file name. -->
+    <mojo goal="jar" prerequisitePhase="prepare-package" stamping="carry">
+      <inputs>
+        <files parameter="classesDirectory"/>
+        <files expression="${project.file}"/>
+      </inputs>
+      <outputs>
+        <file parameter="outputDirectory" name="{finalName}{-classifier}.jar"/>
+      </outputs>
+      <ignoredParameters>classesDirectory, forceCreation</ignoredParameters>
+    </mojo>
+  </plugin>
+
+  <!-- Tests act on what they read (a test may assert the version), so stamps stay in their key. -->
   <plugin groupId="org.apache.maven.plugins" artifactId="maven-surefire-plugin">
     <mojo goal="test" prerequisitePhase="process-test-classes">
       <inputs>

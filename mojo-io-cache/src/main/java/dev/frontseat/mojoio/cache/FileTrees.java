@@ -2,10 +2,8 @@ package dev.frontseat.mojoio.cache;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.security.MessageDigest;
 import java.util.Collections;
 import java.util.Comparator;
-import java.util.HexFormat;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 import java.io.UncheckedIOException;
@@ -29,15 +27,23 @@ public final class FileTrees {
      * where the tree lives on disk and of timestamps.
      */
     public static String hash(Path path) {
+        return hash(path, null);
+    }
+
+    /**
+     * Like {@link #hash(Path)}, with each file's content passed through {@code filter} first (e.g.
+     * {@link Stamps#tokenizeContent}); {@code null} hashes raw bytes.
+     */
+    public static String hash(Path path, java.util.function.UnaryOperator<byte[]> filter) {
         if (Files.isRegularFile(path)) {
-            return Hashing.sha256(path);
+            return fileHash(path, filter);
         }
         if (!Files.isDirectory(path)) {
             return ABSENT;
         }
         StringBuilder manifest = new StringBuilder();
         for (Path file : listFiles(path)) {
-            manifest.append(relative(path, file)).append('\0').append(Hashing.sha256(file)).append('\n');
+            manifest.append(relative(path, file)).append('\0').append(fileHash(file, filter)).append('\n');
         }
         return Hashing.sha256(manifest.toString());
     }
@@ -49,6 +55,11 @@ public final class FileTrees {
      * differently each build. Entry order and compression are ignored too.
      */
     public static String hashClasspathEntry(Path path) {
+        return hashClasspathEntry(path, null);
+    }
+
+    /** {@link #hashClasspathEntry(Path)} with content filtering, also applied to archive entries. */
+    public static String hashClasspathEntry(Path path, java.util.function.UnaryOperator<byte[]> filter) {
         if (Files.isRegularFile(path) && isArchive(path)) {
             try (ZipFile zip = new ZipFile(path.toFile())) {
                 List<? extends ZipEntry> entries = new ArrayList<>(Collections.list(zip.entries()));
@@ -58,23 +69,35 @@ public final class FileTrees {
                     if (e.isDirectory()) {
                         continue;
                     }
-                    MessageDigest digest = Hashing.newDigest();
+                    byte[] content;
                     try (InputStream in = zip.getInputStream(e)) {
-                        byte[] buffer = new byte[64 * 1024];
-                        int n;
-                        while ((n = in.read(buffer)) > 0) {
-                            digest.update(buffer, 0, n);
-                        }
+                        content = in.readAllBytes();
                     }
-                    manifest.append(e.getName()).append('\0').append(HexFormat.of().formatHex(digest.digest()))
-                            .append('\n');
+                    if (filter != null) {
+                        content = filter.apply(content);
+                    }
+                    manifest.append(e.getName()).append('\0').append(Hashing.sha256(content)).append('\n');
                 }
                 return Hashing.sha256(manifest.toString());
             } catch (IOException e) {
                 return Hashing.sha256(path); // not a readable archive after all: fall back to bytes
             }
         }
-        return hash(path);
+        return hash(path, filter);
+    }
+
+    private static String fileHash(Path file, java.util.function.UnaryOperator<byte[]> filter) {
+        if (filter == null) {
+            return Hashing.sha256(file);
+        }
+        try {
+            if (Files.size(file) > 16L * 1024 * 1024) {
+                return Hashing.sha256(file);
+            }
+            return Hashing.sha256(filter.apply(Files.readAllBytes(file)));
+        } catch (IOException e) {
+            throw new UncheckedIOException("Cannot hash " + file, e);
+        }
     }
 
     private static boolean isArchive(Path path) {

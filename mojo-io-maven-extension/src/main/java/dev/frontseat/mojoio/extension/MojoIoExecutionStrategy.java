@@ -3,6 +3,8 @@ package dev.frontseat.mojoio.extension;
 import dev.frontseat.mojoio.cache.CacheEntry;
 import dev.frontseat.mojoio.cache.CacheKey;
 import dev.frontseat.mojoio.cache.LocalCache;
+import dev.frontseat.mojoio.cache.Restamping;
+import dev.frontseat.mojoio.cache.Stamps;
 import dev.frontseat.mojoio.extension.descriptor.DescriptorRegistry;
 import dev.frontseat.mojoio.extension.descriptor.MojoCacheDescriptor;
 import dev.frontseat.mojoio.cache.FileTrees;
@@ -12,6 +14,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.WeakHashMap;
@@ -89,7 +92,7 @@ public class MojoIoExecutionStrategy implements MojosExecutionStrategy {
         List<MojoExecution> plan = config.prerequisites()
                 ? prerequisites.expand(executions, session, project)
                 : executions;
-        PathNormalizer normalizer = normalizer(session, project);
+        PathNormalizer normalizer = normalizer(session, project).withStamps(StampValues.of(session, project));
         if (config.state() && replayed.add(project)) {
             StateFiles.replayPending(project, plan, normalizer);
         }
@@ -107,15 +110,22 @@ public class MojoIoExecutionStrategy implements MojosExecutionStrategy {
                             LocalCache cache, MojoIoConfig config, PathNormalizer normalizer)
             throws LifecycleExecutionException {
         String label = label(m, project);
-        ExecutionContext ctx = new ExecutionContext(session, project, m, normalizer);
         Optional<MojoCacheDescriptor> descriptor = registry.find(m, session);
+        // `normalizer` tokenizes stamps (used for paths and state). The key only does so for mojos that
+        // merely carry stamp values; for the others the values stay in the key.
+        boolean carry = descriptor.map(MojoCacheDescriptor::stampingCarry).orElse(false);
+        ExecutionContext ctx = new ExecutionContext(session, project, m,
+                carry ? normalizer : normalizer.withStamps(Stamps.NONE));
 
         CacheKey key = null;
         if (cache != null) {
             key = cacheKey(m, session, project, ctx, descriptor, label);
             if (key != null && config.read()) {
                 Optional<CacheEntry> entry = cache.lookup(key.hash());
-                if (entry.isPresent() && restore(entry.get(), ctx, cache, label, key.hash())) {
+                if (entry.isPresent() && entry.get().isRedirect()) {
+                    entry = cache.lookup(CacheKeyCalculator.pinned(key.hash(), normalizer.stamps()));
+                }
+                if (entry.isPresent() && restore(entry.get(), ctx, normalizer, cache, label, key.hash())) {
                     if (config.state()) {
                         StateFiles.record(project, m, entry.get().state(), null);
                     }
@@ -137,7 +147,7 @@ public class MojoIoExecutionStrategy implements MojosExecutionStrategy {
             StateFiles.record(project, m, state == null ? List.of() : state, incomplete);
         }
         if (key != null) {
-            store(m, ctx, cache, config, descriptor.get(), key, state, incomplete, label);
+            store(m, ctx, normalizer.stamps(), cache, config, descriptor.get(), key, state, incomplete, label);
         }
     }
 
@@ -167,7 +177,7 @@ public class MojoIoExecutionStrategy implements MojosExecutionStrategy {
         return null;
     }
 
-    private void store(MojoExecution m, ExecutionContext ctx, LocalCache cache, MojoIoConfig config,
+    private void store(MojoExecution m, ExecutionContext ctx, Stamps stamps, LocalCache cache, MojoIoConfig config,
                        MojoCacheDescriptor descriptor, CacheKey key, List<CacheEntry.StateRecord> state,
                        String incomplete, String label) {
         String hash = key.hash();
@@ -181,6 +191,8 @@ public class MojoIoExecutionStrategy implements MojosExecutionStrategy {
         }
         try {
             Map<String, Path> outputs = new TreeMap<>();
+            List<LocalCache.StoredFile> files = new ArrayList<>();
+            String unstampable = null;
             for (OutputSpec spec : descriptor.outputs()) {
                 for (ResolvedOutput output : spec.resolve(ctx)) {
                     for (Path file : output.existingFiles()) {
@@ -192,9 +204,25 @@ public class MojoIoExecutionStrategy implements MojosExecutionStrategy {
                     }
                 }
             }
-            cache.store(hash, CacheKeyCalculator.mojoId(m), outputs, state, key.manifest());
-            LOG.info(PREFIX + "MISS  {} [{}] stored {} file(s), {} state change(s)", label, shortHash(hash),
-                    outputs.size(), state.size());
+            for (Map.Entry<String, Path> o : outputs.entrySet()) {
+                Restamping.Mode mode = descriptor.stampingCarry() ? Restamping.classify(o.getValue(), stamps)
+                        : Restamping.Mode.RAW;
+                if (mode == Restamping.Mode.UNSTAMPABLE && unstampable == null) {
+                    unstampable = o.getKey();
+                }
+                files.add(new LocalCache.StoredFile(stamps.tokenize(o.getKey()), o.getValue(), mode));
+            }
+            String storeKey = hash;
+            if (unstampable != null) {
+                // The stamp-free key cannot serve other stamp values: point it at a key pinned to these.
+                cache.storeRedirect(hash, CacheKeyCalculator.mojoId(m),
+                        unstampable + " embeds stamp values where they cannot be rewritten");
+                storeKey = CacheKeyCalculator.pinned(hash, stamps);
+            }
+            cache.store(storeKey, CacheKeyCalculator.mojoId(m), files, state, stamps.values(), key.manifest());
+            LOG.info(PREFIX + "MISS  {} [{}] stored {} file(s), {} state change(s){}", label, shortHash(hash),
+                    outputs.size(), state.size(), unstampable == null ? "" : ", pinned to stamp values ("
+                            + unstampable + " embeds them)");
         } catch (NotCacheableException e) {
             LOG.info(PREFIX + "MISS  {} [{}] not stored: {}", label, shortHash(hash), e.getMessage());
         } catch (RuntimeException e) {
@@ -203,10 +231,11 @@ public class MojoIoExecutionStrategy implements MojosExecutionStrategy {
         }
     }
 
-    private boolean restore(CacheEntry entry, ExecutionContext ctx, LocalCache cache, String label, String hash) {
+    private boolean restore(CacheEntry entry, ExecutionContext ctx, PathNormalizer normalizer, LocalCache cache,
+                            String label, String hash) {
         Set<Path> missing = new LinkedHashSet<>();
         for (CacheEntry.StateRecord r : entry.state()) {
-            missing.addAll(ctx.normalizer().missingRepositoryFiles(r.value()));
+            missing.addAll(normalizer.missingRepositoryFiles(r.value()));
         }
         if (!missing.isEmpty()) {
             LOG.info(PREFIX + "MISS  {} [{}] cached state needs files missing from the local repository: {}",
@@ -214,14 +243,19 @@ public class MojoIoExecutionStrategy implements MojosExecutionStrategy {
             return false;
         }
         try {
-            cache.restoreFiles(entry, ctx.basedir());
-            ProjectState.apply(entry.state(), ctx.project(), ctx.normalizer());
+            cache.restoreFiles(entry, ctx.basedir(), normalizer.stamps());
+            ProjectState.apply(entry.state(), ctx.project(), normalizer);
         } catch (RuntimeException e) {
             LOG.warn(PREFIX + "restore of {} failed, running instead: {}", label, e.toString());
             return false;
         }
-        LOG.info(PREFIX + "HIT   {} [{}] restored {} file(s), {} state change(s)", label, shortHash(hash),
-                entry.files().size(), entry.state().size());
+        boolean carriesStamps = entry.files().stream().anyMatch(f -> f.mode() == Restamping.Mode.TEXT
+                || f.mode() == Restamping.Mode.ARCHIVE || f.path().contains("@@STAMP:"))
+                || entry.state().stream().anyMatch(r -> r.value() != null && r.value().contains("@@STAMP:"));
+        boolean restamped = carriesStamps && !entry.stamps().equals(normalizer.stamps().values());
+        LOG.info(PREFIX + "HIT   {} [{}] restored {} file(s), {} state change(s){}", label, shortHash(hash),
+                entry.files().size(), entry.state().size(), restamped ? ", restamped " + entry.stamps()
+                        + " -> " + normalizer.stamps().values() : "");
         return true;
     }
 

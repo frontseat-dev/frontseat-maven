@@ -19,6 +19,19 @@ public final class Inputs {
         return ctx -> List.of(ResolvedInput.files(parameter, ctx.parameterPaths(parameter)));
     }
 
+    /** Files or directory trees a Maven expression evaluates to, e.g. {@code ${project.file}}. */
+    public static InputSpec filesAt(String expression) {
+        return ctx -> {
+            Object value = ctx.evaluateExpression(expression);
+            List<Path> paths = new ArrayList<>();
+            if (value != null && !value.toString().isBlank()) {
+                Path p = Path.of(value.toString());
+                paths.add(p.isAbsolute() ? p : ctx.basedir().resolve(p));
+            }
+            return List.of(ResolvedInput.files(expression, paths));
+        };
+    }
+
     /**
      * A classpath parameter, compared by content in order. The mojo's own output directory is skipped:
      * Maven puts it on the classpath (javac's {@code compilePath} starts with {@code target/classes}),

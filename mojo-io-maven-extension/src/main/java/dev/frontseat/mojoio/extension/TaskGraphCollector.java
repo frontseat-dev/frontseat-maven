@@ -97,6 +97,7 @@ public class TaskGraphCollector {
         e.put("phase", m.getLifecyclePhase());
         Optional<MojoCacheDescriptor> descriptor = registry.find(m, session);
         e.put("declaredBy", descriptor.map(MojoCacheDescriptor::source).orElse(null));
+        e.put("stamping", descriptor.map(d -> d.stampingCarry() ? "carry" : "exact").orElse("exact"));
 
         List<Object> inputs = new ArrayList<>();
         List<Object> outputs = new ArrayList<>();

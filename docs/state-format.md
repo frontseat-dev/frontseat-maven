@@ -35,7 +35,8 @@ change property argLine -javaagent%3A%40%40M2REPO%40%40%2F...%3Ddestfile%3D%40%4
 
 Paths in values use the tokens `@@BASEDIR@@` (the module), `@@ROOT@@` (the multi-module root) and
 `@@M2REPO@@` (the local repository), so a state file stays valid in another checkout or on another
-machine. If a value refers to a local-repository file that's missing (for example the JaCoCo agent
+machine. Stamp values such as the project version appear as `@@STAMP:<name>@@` (e.g. the jar plugin's
+`artifactFile`), so the state follows a version bump too ([versioning](versioning.md)). If a value refers to a local-repository file that's missing (for example the JaCoCo agent
 jar), the record isn't replayed.
 
 ## Replay rules

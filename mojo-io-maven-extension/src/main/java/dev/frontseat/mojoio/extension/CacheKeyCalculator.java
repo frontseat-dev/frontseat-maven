@@ -29,6 +29,7 @@ final class CacheKeyCalculator {
         key.add("mojo", mojoId(m));
         key.add("pluginDependencies", pluginDependencies(m.getPlugin()));
         key.add("jdk", System.getProperty("java.vendor") + " " + System.getProperty("java.runtime.version"));
+        key.add("stamping", descriptor.stampingCarry() ? "carry" : "exact");
         key.add("configuration", ConfigurationHasher.render(ctx, descriptor.ignoredParameters()));
         for (InputSpec spec : descriptor.inputs()) {
             for (ResolvedInput input : spec.resolve(ctx)) {
@@ -40,34 +41,41 @@ final class CacheKeyCalculator {
 
     /** The cache's view of a resolved input: content, not timestamps or absolute locations. */
     static String hash(ExecutionContext ctx, ResolvedInput input) {
+        java.util.function.UnaryOperator<byte[]> filter = ctx.normalizer().stamps().isEmpty() ? null
+                : ctx.normalizer().stamps()::tokenizeContent;
         return switch (input.kind()) {
             case VALUE -> input.value() == null ? "null" : input.value();
             case CLASSPATH -> {
                 List<String> parts = new ArrayList<>();
                 for (Path p : input.paths()) {
-                    parts.add((Files.isDirectory(p) ? "dir:" : "file:") + FileTrees.hashClasspathEntry(p));
+                    parts.add((Files.isDirectory(p) ? "dir:" : "file:") + FileTrees.hashClasspathEntry(p, filter));
                 }
                 yield String.join(",", parts);
             }
             case FILES -> {
                 List<String> parts = new ArrayList<>();
                 for (Path p : input.paths()) {
-                    parts.add(ctx.normalizer().normalize(p.toString()) + " " + filesHash(p, input));
+                    parts.add(ctx.normalizer().normalize(p.toString()) + " " + filesHash(p, input, filter));
                 }
                 yield String.join(";", parts);
             }
         };
     }
 
-    private static String filesHash(Path p, ResolvedInput input) {
+    /** Key for an entry whose outputs embed stamp values that cannot be rewritten: pinned to the values. */
+    static String pinned(String key, dev.frontseat.mojoio.cache.Stamps stamps) {
+        return Hashing.sha256(key + "|stamps=" + stamps.values());
+    }
+
+    private static String filesHash(Path p, ResolvedInput input, java.util.function.UnaryOperator<byte[]> filter) {
         if (input.includes().isEmpty() && input.excludes().isEmpty()) {
-            return FileTrees.hash(p);
+            return FileTrees.hash(p, filter);
         }
         StringBuilder sb = new StringBuilder();
         for (Path f : FileTrees.listFiles(p)) {
             String rel = FileTrees.relative(p, f);
             if (AntPattern.selected(rel, input.includes(), input.excludes())) {
-                sb.append(rel).append('=').append(Hashing.sha256(f)).append(';');
+                sb.append(rel).append('=').append(FileTrees.hash(f, filter)).append(';');
             }
         }
         return Hashing.sha256("includes=" + input.includes() + " excludes=" + input.excludes() + " " + sb);
