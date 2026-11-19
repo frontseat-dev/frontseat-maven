@@ -17,9 +17,14 @@ mojo.
 [frontseat] MISS  surefire:test (default-cli) @ lib-core [60ae2c0f3daa] stored 3 file(s), 0 state change(s)
 ```
 
+Frontseat works on **Maven 3.9 and Maven 4** from the same jar. What each mojo reads and writes is
+declared in [`plugin-io.xml`](docs/plugin-io.md), a small format with no Maven dependency.
+Plugins can ship it, projects can override it, and Maven 4 could adopt it; see the
+[proposal](docs/maven4-proposal.md).
+
 ## Status
 
-First slice, working end to end. It covers:
+First slice, working end to end on Maven 3.9.11 and 4.0.0-rc-7:
 
 | Goal | Inputs (besides config) | Outputs | Project state replayed |
 |---|---|---|---|
@@ -28,16 +33,33 @@ First slice, working end to end. It covers:
 | `surefire:test` | test classpath, classes, test classes | `surefire-reports/**`, JaCoCo `destfile` | – |
 | `jacoco:prepare-agent` | current `argLine` | – | `argLine` |
 
-Mojos without a descriptor always run normally. Anything unexpected while computing a key or storing
-an entry falls back to running the mojo.
+Mojos nobody declares always run normally. If anything unexpected happens while computing a key or
+storing an entry, the mojo just runs.
 
-## Try it
+## Tooling: mise
+
+[mise](https://mise.jdx.dev) pins the JDK and both Maven lines, and defines the tasks. There is no
+Maven wrapper.
 
 ```bash
-./mvnw install
+mise install            # temurin-21, Maven 3.9.11 and 4.0.0-rc-7
+mise tasks              # list tasks
 ```
 
-Then in any Maven 3.9+ project, add `.mvn/extensions.xml`:
+| Task | |
+|---|---|
+| `mise run build` | Compile and package every module, no tests. |
+| `mise run test` | Unit tests. |
+| `mise run it` | Unit + integration tests; the ITs fork Maven 3.9. |
+| `mise run it:maven4` | Integration tests forking Maven 4 (asserts the forked version). |
+| `mise run ci` | `it` then `it:maven4`. This is what GitHub Actions runs. |
+| `mise run demo -- [--maven4] [--fresh] <goals>` | Run the sample project with the extension, e.g. `mise run demo -- --fresh surefire:test`. |
+| `mise run install` | Install to `~/.m2` for use via `.mvn/extensions.xml`. |
+| `mise run cache:clear` | Delete the local cache. |
+
+## Use it in a project
+
+After `mise run install`, add `.mvn/extensions.xml` to any Maven 3.9+ or 4 project:
 
 ```xml
 <extensions>
@@ -49,14 +71,19 @@ Then in any Maven 3.9+ project, add `.mvn/extensions.xml`:
 </extensions>
 ```
 
-Or load it without touching the project:
-
-```bash
-mvn verify -Dmaven.ext.class.path=frontseat-maven-extension/target/frontseat-maven-extension-0.1.0-SNAPSHOT.jar:frontseat-cache-core/target/frontseat-cache-core-0.1.0-SNAPSHOT.jar
-```
-
 Goals invoked directly get their prerequisites. On a fresh checkout, `mvn surefire:test` first runs
 or restores the lifecycle up to `process-test-classes`, then runs the tests.
+
+To declare or override a mojo's I/O for one project, for example to stop caching tests that hit a
+live service, drop a file in `.mvn/plugin-io/`:
+
+```xml
+<plugin-io xmlns="https://frontseat.dev/xsd/plugin-io/1.0">
+  <plugin groupId="org.apache.maven.plugins" artifactId="maven-surefire-plugin">
+    <mojo goal="test" cacheable="false" reason="integration tests hit a live service"/>
+  </plugin>
+</plugin-io>
+```
 
 ### Settings
 
@@ -69,25 +96,23 @@ or restores the lifecycle up to `process-test-classes`, then runs the tests.
 
 ### Why did it miss?
 
-Every cacheable execution writes its key's inputs to
-`target/frontseat/<plugin>-<goal>-<executionId>.key.txt`, and the cache keeps a copy per key under
+Every cacheable execution writes its key's inputs, and which declaration was used, to
+`target/frontseat/<plugin>-<goal>-<executionId>.key.txt`. The cache keeps a copy per key under
 `<cache>/keys/`. To see which input changed, diff two of them.
 
 ## Repository layout
 
 | Module | |
 |---|---|
+| `frontseat-plugin-io` | The `plugin-io.xml` format: model, reader, XSD. JDK only, so it can be adopted anywhere. |
 | `frontseat-cache-core` | Maven-agnostic: hashing, cache keys, Ant patterns, the local content-addressed store. |
-| `frontseat-maven-extension` | The core extension: execution strategy, descriptors, project-state diff, prerequisite expansion. |
-| `frontseat-it` | Integration tests that fork real Maven builds of the sample projects in `src/it/projects`. |
-| `docs/` | [Design notes and roadmap](docs/design.md). |
+| `frontseat-maven-extension` | The core extension: execution strategy, declaration lookup, project-state diff, prerequisites. |
+| `frontseat-it` | Integration tests that fork real Maven 3.9 / 4 builds of the projects in `src/it/projects`. |
+| `mise.toml`, `mise-tasks/` | Toolchain and tasks. |
+| `docs/` | [Design notes](docs/design.md), [plugin-io format](docs/plugin-io.md), [Maven 4 proposal](docs/maven4-proposal.md). |
 
 ## Development
 
-```bash
-./mvnw verify                        # unit tests + integration tests
-./mvnw verify -pl frontseat-it -am   # same; -am builds the extension first
-```
-
 The ITs copy `frontseat-it/src/it/projects/<name>` to `frontseat-it/target/it/<test>/<checkout>/`
-and keep every forked build's log there (`build-*.log`). Requires JDK 17+.
+and keep every forked build's log there (`build-*.log`, which starts with the Maven version).
+Requires JDK 17+. Plain `mvn verify` also works if you'd rather not use mise.

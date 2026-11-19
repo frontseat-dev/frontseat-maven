@@ -23,7 +23,7 @@ import java.util.stream.Stream;
 final class MavenBuild {
 
     private static final Pattern FRONTSEAT_LINE =
-            Pattern.compile("\\[frontseat] (HIT|MISS|SKIP) +(\\S+) \\((\\S+)\\) @ (\\S+)");
+            Pattern.compile("\\[frontseat] (HIT|MISS|SKIP) +(\\S+) \\((\\S+)\\) @ ([^\\s:]+)");
 
     private final Path projectDir;
     private final Path cacheDir;
@@ -47,14 +47,24 @@ final class MavenBuild {
         return dir;
     }
 
+    /**
+     * The Maven to fork: {@code -Dfrontseat.it.maven.home=...} (e.g. a Maven 4 install), else the
+     * Maven running this build.
+     */
+    static Path mavenHome() {
+        String override = System.getProperty("frontseat.it.maven.home");
+        return Path.of(override != null && !override.isBlank() ? override : System.getProperty("maven.home"));
+    }
+
     Path dir() {
         return projectDir;
     }
 
     Result run(String... goals) {
         List<String> cmd = new ArrayList<>();
-        cmd.add(Path.of(System.getProperty("maven.home"), "bin", "mvn").toString());
+        cmd.add(mavenHome().resolve("bin").resolve("mvn").toString());
         cmd.add("-B");
+        cmd.add("-V"); // print the Maven version, so logs show which Maven line was exercised
         cmd.add("-Dmaven.ext.class.path=" + System.getProperty("frontseat.ext.classpath"));
         cmd.add("-Dfrontseat.cache.dir=" + cacheDir);
         String localRepo = System.getProperty("frontseat.it.localRepo");
@@ -74,6 +84,11 @@ final class MavenBuild {
                 fail("Maven timed out: " + cmd);
             }
             String output = Files.readString(log, StandardCharsets.UTF_8);
+            String expected = System.getProperty("frontseat.it.expectMavenVersion");
+            if (expected != null && !expected.isBlank() && !output.contains("Apache Maven " + expected)) {
+                fail("Expected to fork Maven " + expected + " but got:\n"
+                        + output.lines().filter(l -> l.startsWith("Apache Maven")).findFirst().orElse(output));
+            }
             Result result = new Result(process.exitValue(), output);
             if (result.exitCode != 0) {
                 fail("Maven failed (" + result.exitCode + "): " + String.join(" ", goals) + "\n" + output);

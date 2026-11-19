@@ -20,6 +20,9 @@
   <properties>
     <maven.deploy.skip>true</maven.deploy.skip>
     <maven.install.skip>true</maven.install.skip>
+    <!-- Fork a different Maven for the ITs, e.g. a Maven 4 install (see mise.toml). -->
+    <frontseat.it.maven.home/>
+    <frontseat.it.expectMavenVersion/>
   </properties>
 
   <dependencies>
@@ -69,6 +72,8 @@
         <configuration>
           <systemPropertyVariables>
             <maven.home>${maven.home}</maven.home>
+            <frontseat.it.maven.home>${frontseat.it.maven.home}</frontseat.it.maven.home>
+            <frontseat.it.expectMavenVersion>${frontseat.it.expectMavenVersion}</frontseat.it.expectMavenVersion>
             <frontseat.ext.classpath>${frontseat.ext.classpath}</frontseat.ext.classpath>
             <frontseat.it.projects>${project.basedir}/src/it/projects</frontseat.it.projects>
             <frontseat.it.work>${project.build.directory}/it</frontseat.it.work>

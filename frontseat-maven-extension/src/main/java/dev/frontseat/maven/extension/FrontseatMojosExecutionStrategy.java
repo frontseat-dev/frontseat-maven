@@ -86,7 +86,7 @@ public class FrontseatMojosExecutionStrategy implements MojosExecutionStrategy {
     private void executeOne(MojoExecution m, MavenSession session, MavenProject project, MojoExecutionRunner runner,
                             LocalCache cache, FrontseatConfig config) throws LifecycleExecutionException {
         String label = label(m, project);
-        Optional<MojoCacheDescriptor> found = registry.find(m);
+        Optional<MojoCacheDescriptor> found = registry.find(m, session);
         if (found.isEmpty()) {
             LOG.debug(PREFIX + "no descriptor for {}, running", label);
             runner.run(m);
@@ -117,7 +117,7 @@ public class FrontseatMojosExecutionStrategy implements MojosExecutionStrategy {
             return;
         }
         String hash = key.hash();
-        writeKeyManifest(project, m, key);
+        writeKeyManifest(project, m, key, descriptor);
 
         if (config.read()) {
             Optional<CacheEntry> entry = cache.lookup(hash);
@@ -194,12 +194,14 @@ public class FrontseatMojosExecutionStrategy implements MojosExecutionStrategy {
     }
 
     /** Writes the key's inputs to target/frontseat/ so a miss can be explained by diffing two runs. */
-    private static void writeKeyManifest(MavenProject project, MojoExecution m, CacheKey key) {
+    private static void writeKeyManifest(MavenProject project, MojoExecution m, CacheKey key,
+                                         MojoCacheDescriptor descriptor) {
         try {
             Path dir = Path.of(project.getBuild().getDirectory(), "frontseat");
             Files.createDirectories(dir);
             String name = m.getArtifactId() + "-" + m.getGoal() + "-" + m.getExecutionId() + ".key.txt";
-            Files.writeString(dir.resolve(name), "key = " + key.hash() + "\n" + key.manifest(), StandardCharsets.UTF_8);
+            Files.writeString(dir.resolve(name), "key = " + key.hash() + "\ndescriptor = " + descriptor.source() + "\n"
+                    + key.manifest(), StandardCharsets.UTF_8);
         } catch (IOException | RuntimeException e) {
             LOG.debug(PREFIX + "cannot write key manifest", e);
         }

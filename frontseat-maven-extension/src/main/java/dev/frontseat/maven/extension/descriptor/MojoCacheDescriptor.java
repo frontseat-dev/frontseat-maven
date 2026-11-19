@@ -6,7 +6,7 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * Declares how one plugin goal is cached: which inputs go into the key, which files are its outputs,
+ * Executable form of a plugin-io declaration: how one plugin goal is cached: which inputs go into the key, which files are its outputs,
  * which configuration parameters to leave out of the configuration hash, and which lifecycle phase it
  * needs to have run before it when invoked directly from the command line.
  *
@@ -29,8 +29,10 @@ public final class MojoCacheDescriptor {
     private final List<OutputSpec> outputs;
     private final Set<String> ignoredParameters;
     private final String prerequisitePhase;
+    private final String source;
 
     private MojoCacheDescriptor(Builder b) {
+        this.source = b.source;
         this.pluginKey = b.pluginKey;
         this.goal = b.goal;
         this.notCacheableReason = b.notCacheableReason;
@@ -74,6 +76,11 @@ public final class MojoCacheDescriptor {
         return ignoredParameters;
     }
 
+    /** Where this descriptor came from (built-in, plugin, project file); shown in key manifests. */
+    public String source() {
+        return source;
+    }
+
     /** Lifecycle phase to run first when this goal is invoked directly, or {@code null}. */
     public String prerequisitePhase() {
         return prerequisitePhase;
@@ -87,6 +94,7 @@ public final class MojoCacheDescriptor {
         private final List<OutputSpec> outputs = new ArrayList<>();
         private final Set<String> ignored = new LinkedHashSet<>();
         private String prerequisitePhase;
+        private String source = "code";
 
         private Builder(String pluginKey, String goal) {
             this.pluginKey = pluginKey;
@@ -109,6 +117,11 @@ public final class MojoCacheDescriptor {
          */
         public Builder ignore(String... parameters) {
             ignored.addAll(List.of(parameters));
+            return this;
+        }
+
+        public Builder source(String source) {
+            this.source = source;
             return this;
         }
 
