@@ -4,19 +4,19 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
   <modelVersion>4.0.0</modelVersion>
 
-  <groupId>dev.frontseat.maven</groupId>
-  <artifactId>frontseat-maven-parent</artifactId>
+  <groupId>dev.frontseat.mojoio</groupId>
+  <artifactId>mojo-io-parent</artifactId>
   <version>0.1.0-SNAPSHOT</version>
   <packaging>pom</packaging>
 
-  <name>Frontseat Maven</name>
+  <name>mojo-io</name>
   <description>Mojo-level build cache for Maven 3.9+, delivered as a core extension.</description>
 
   <modules>
-    <module>frontseat-plugin-io</module>
-    <module>frontseat-cache-core</module>
-    <module>frontseat-maven-extension</module>
-    <module>frontseat-it</module>
+    <module>mojo-io-spec</module>
+    <module>mojo-io-cache</module>
+    <module>mojo-io-maven-extension</module>
+    <module>mojo-io-it</module>
   </modules>
 
   <properties>
@@ -32,18 +32,18 @@
   <dependencyManagement>
     <dependencies>
       <dependency>
-        <groupId>dev.frontseat.maven</groupId>
-        <artifactId>frontseat-plugin-io</artifactId>
+        <groupId>dev.frontseat.mojoio</groupId>
+        <artifactId>mojo-io-spec</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>
-        <groupId>dev.frontseat.maven</groupId>
-        <artifactId>frontseat-cache-core</artifactId>
+        <groupId>dev.frontseat.mojoio</groupId>
+        <artifactId>mojo-io-cache</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>
-        <groupId>dev.frontseat.maven</groupId>
-        <artifactId>frontseat-maven-extension</artifactId>
+        <groupId>dev.frontseat.mojoio</groupId>
+        <artifactId>mojo-io-maven-extension</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>

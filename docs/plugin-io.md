@@ -5,8 +5,8 @@ Because it's tied to parameters, one declaration holds for every configuration o
 the contract that lets a tool cache a mojo execution, restore it in a different checkout, or put it
 into a monorepo task graph without running it.
 
-The format lives in its own dependency-free module (`frontseat-plugin-io`), with an XSD at
-`dev/frontseat/maven/pluginio/plugin-io-1.0.xsd`. It's meant to be adopted as is by plugins, by
+The format lives in its own dependency-free module (`mojo-io-spec`), with an XSD at
+`dev/frontseat/mojoio/spec/plugin-io-1.0.xsd`. It's meant to be adopted as is by plugins, by
 Maven core and by other tools. See the [Maven 4 proposal](maven4-proposal.md).
 
 ## Where declarations come from
@@ -26,7 +26,7 @@ also treated as not cacheable.
 ## Example
 
 ```xml
-<plugin-io xmlns="https://frontseat.dev/xsd/plugin-io/1.0">
+<plugin-io xmlns="urn:mojo-io:plugin-io:1.0">
   <plugin groupId="org.apache.maven.plugins" artifactId="maven-compiler-plugin">
     <mojo goal="compile" prerequisitePhase="process-resources">
       <inputs>

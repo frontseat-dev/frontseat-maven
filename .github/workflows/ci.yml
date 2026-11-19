@@ -25,5 +25,5 @@ jobs:
         with:
           name: it-logs
           path: |
-            frontseat-it/target/it/**/build-*.log
-            frontseat-it/target/failsafe-reports/
+            mojo-io-it/target/it/**/build-*.log
+            mojo-io-it/target/failsafe-reports/

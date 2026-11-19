@@ -1,23 +1,39 @@
-# Frontseat Maven
+# mojo-io
 
-A mojo-level build cache for Maven 3.9+, shipped as an ordinary **core extension**. You don't need a
-Maven fork or a core patch, and you don't have to change your POMs.
+**Per-mojo inputs, outputs and project state for Maven: tool-agnostic.**
+
+mojo-io makes every Maven mojo execution a well-defined task: what it reads, what it writes, and
+what it changes in the in-memory project. It is neutral infrastructure. A build cache, a monorepo
+orchestrator (Nx, Bazel, Frontseat, …) or Maven itself can consume it; mojo-io knows about none of
+them. Tool integrations live outside it, as adapters.
+
+## Architecture
+
+| Layer | What | Knows about tools? |
+|---|---|---|
+| **Specs** (`mojo-io-spec`) | Versioned, documented formats: [`plugin-io.xml`](docs/plugin-io.md) declares mojo I/O. A task-graph format and a project-state format are next. JDK-only, no Maven dependency. | No |
+| **Maven extension** (`mojo-io-maven-extension`) | An ordinary core extension (`.mvn/extensions.xml`) for Maven 3.9 and 4. It resolves each execution's inputs and outputs, captures and replays project state, and includes an optional local cache. | No |
+| **Adapters** (outside this repo's core) | Nx, Frontseat, Bazel, CI caches, … Each translates the neutral formats for one tool. | Yes, one tool each |
+
+You don't need a Maven fork or a core patch, and you don't have to change your POMs.
+
+## The built-in cache (one consumer)
 
 Every mojo execution is wrapped by a custom `MojosExecutionStrategy`. For goals it has a descriptor
-for, Frontseat computes a cache key from the plugin, the JDK, the effective configuration and the
+for, mojo-io computes a cache key from the plugin, the JDK, the effective configuration and the
 content of the declared inputs. On a hit it restores the output files *and* the changes the mojo made to
 the `MavenProject` (source roots, properties like `argLine`, the artifact file), then skips the
 mojo.
 
 ```
-[frontseat] HIT   jacoco:prepare-agent (default) @ lib-core [9b7380f2feb5] restored 0 file(s), 1 state change(s)
-[frontseat] HIT   resources:resources (default-resources) @ lib-core [b26d37d233dd] restored 1 file(s), 0 state change(s)
-[frontseat] HIT   compiler:compile (default-compile) @ lib-core [67d916192e10] restored 1 file(s), 2 state change(s)
-[frontseat] HIT   compiler:testCompile (default-testCompile) @ lib-core [134d1b66a470] restored 1 file(s), 1 state change(s)
-[frontseat] MISS  surefire:test (default-cli) @ lib-core [60ae2c0f3daa] stored 3 file(s), 0 state change(s)
+[mojo-io] HIT   jacoco:prepare-agent (default) @ lib-core [9b7380f2feb5] restored 0 file(s), 1 state change(s)
+[mojo-io] HIT   resources:resources (default-resources) @ lib-core [b26d37d233dd] restored 1 file(s), 0 state change(s)
+[mojo-io] HIT   compiler:compile (default-compile) @ lib-core [67d916192e10] restored 1 file(s), 2 state change(s)
+[mojo-io] HIT   compiler:testCompile (default-testCompile) @ lib-core [134d1b66a470] restored 1 file(s), 1 state change(s)
+[mojo-io] MISS  surefire:test (default-cli) @ lib-core [60ae2c0f3daa] stored 3 file(s), 0 state change(s)
 ```
 
-Frontseat works on **Maven 3.9 and Maven 4** from the same jar. What each mojo reads and writes is
+mojo-io works on **Maven 3.9 and Maven 4** from the same jar. What each mojo reads and writes is
 declared in [`plugin-io.xml`](docs/plugin-io.md), a small format with no Maven dependency.
 Plugins can ship it, projects can override it, and Maven 4 could adopt it; see the
 [proposal](docs/maven4-proposal.md).
@@ -59,7 +75,7 @@ its plugin. A plugin's own `META-INF/maven/plugin-io.xml` and a project's `.mvn/
 the built-in declarations. To add a row, add the declaration to `builtin-plugin-io.xml`, check its
 parameters against the plugin versions, and add an IT before marking it ✅.
 
-**Tip:** set `project.build.outputTimestamp` (reproducible builds) in your projects. Frontseat
+**Tip:** set `project.build.outputTimestamp` (reproducible builds) in your projects. mojo-io
 doesn't need it, but it makes the jars themselves identical across builds, which a shared or remote
 cache will benefit from. Maven 4 sets a default.
 
@@ -91,8 +107,8 @@ After `mise run install`, add `.mvn/extensions.xml` to any Maven 3.9+ or 4 proje
 ```xml
 <extensions>
   <extension>
-    <groupId>dev.frontseat.maven</groupId>
-    <artifactId>frontseat-maven-extension</artifactId>
+    <groupId>dev.frontseat.mojoio</groupId>
+    <artifactId>mojo-io-maven-extension</artifactId>
     <version>0.1.0-SNAPSHOT</version>
   </extension>
 </extensions>
@@ -105,7 +121,7 @@ To declare or override a mojo's I/O for one project, for example to stop caching
 live service, drop a file in `.mvn/plugin-io/`:
 
 ```xml
-<plugin-io xmlns="https://frontseat.dev/xsd/plugin-io/1.0">
+<plugin-io xmlns="urn:mojo-io:plugin-io:1.0">
   <plugin groupId="org.apache.maven.plugins" artifactId="maven-surefire-plugin">
     <mojo goal="test" cacheable="false" reason="integration tests hit a live service"/>
   </plugin>
@@ -116,30 +132,30 @@ live service, drop a file in `.mvn/plugin-io/`:
 
 | Property | Default | |
 |---|---|---|
-| `frontseat.cache.enabled` | `true` | Master switch. |
-| `frontseat.cache.dir` | `~/.m2/frontseat-cache` | Local cache location. |
-| `frontseat.cache.read` / `frontseat.cache.write` | `true` | E.g. `write=false` for a read-only CI consumer. |
-| `frontseat.prerequisites` | `true` | Expand directly-invoked goals with their lifecycle prerequisites. |
+| `mojoio.cache.enabled` | `true` | Master switch. |
+| `mojoio.cache.dir` | `~/.m2/mojo-io-cache` | Local cache location. |
+| `mojoio.cache.read` / `mojoio.cache.write` | `true` | E.g. `write=false` for a read-only CI consumer. |
+| `mojoio.prerequisites` | `true` | Expand directly-invoked goals with their lifecycle prerequisites. |
 
 ### Why did it miss?
 
 Every cacheable execution writes its key's inputs, and which declaration was used, to
-`target/frontseat/<plugin>-<goal>-<executionId>.key.txt`. The cache keeps a copy per key under
+`target/mojo-io/<plugin>-<goal>-<executionId>.key.txt`. The cache keeps a copy per key under
 `<cache>/keys/`. To see which input changed, diff two of them.
 
 ## Repository layout
 
 | Module | |
 |---|---|
-| `frontseat-plugin-io` | The `plugin-io.xml` format: model, reader, XSD. JDK only, so it can be adopted anywhere. |
-| `frontseat-cache-core` | Maven-agnostic: hashing, cache keys, Ant patterns, the local content-addressed store. |
-| `frontseat-maven-extension` | The core extension: execution strategy, declaration lookup, project-state diff, prerequisites. |
-| `frontseat-it` | Integration tests that fork real Maven 3.9 / 4 builds of the projects in `src/it/projects`. |
+| `mojo-io-spec` | The `plugin-io.xml` format: model, reader, XSD. JDK only, so it can be adopted anywhere. |
+| `mojo-io-cache` | Maven-agnostic: hashing, cache keys, Ant patterns, the local content-addressed store. |
+| `mojo-io-maven-extension` | The core extension: execution strategy, declaration lookup, project-state diff, prerequisites. |
+| `mojo-io-it` | Integration tests that fork real Maven 3.9 / 4 builds of the projects in `src/it/projects`. |
 | `mise.toml`, `mise-tasks/` | Toolchain and tasks. |
 | `docs/` | [Design notes](docs/design.md), [plugin-io format](docs/plugin-io.md), [Maven 4 proposal](docs/maven4-proposal.md). |
 
 ## Development
 
-The ITs copy `frontseat-it/src/it/projects/<name>` to `frontseat-it/target/it/<test>/<checkout>/`
+The ITs copy `mojo-io-it/src/it/projects/<name>` to `mojo-io-it/target/it/<test>/<checkout>/`
 and keep every forked build's log there (`build-*.log`, which starts with the Maven version).
 Requires JDK 17+. Plain `mvn verify` also works if you'd rather not use mise.

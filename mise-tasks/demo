@@ -7,12 +7,12 @@
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
-sample="$root/frontseat-it/src/it/projects/basic-multimodule"
+sample="$root/mojo-io-it/src/it/projects/basic-multimodule"
 work="$root/target/demo/basic-multimodule"
 version="$(cd "$root" && mvn -q help:evaluate -Dexpression=project.version -DforceStdout 2>/dev/null)"
-ext="$root/frontseat-maven-extension/target/frontseat-maven-extension-$version.jar"
-ext="$ext:$root/frontseat-plugin-io/target/frontseat-plugin-io-$version.jar"
-ext="$ext:$root/frontseat-cache-core/target/frontseat-cache-core-$version.jar"
+ext="$root/mojo-io-maven-extension/target/mojo-io-maven-extension-$version.jar"
+ext="$ext:$root/mojo-io-spec/target/mojo-io-spec-$version.jar"
+ext="$ext:$root/mojo-io-cache/target/mojo-io-cache-$version.jar"
 
 if [[ "${usage_fresh:-false}" == "true" || ! -d "$work" ]]; then
   rm -rf "$work" && mkdir -p "$(dirname "$work")" && cp -r "$sample" "$work"
@@ -20,11 +20,11 @@ fi
 
 mvn_bin=mvn
 if [[ "${usage_maven4:-false}" == "true" ]]; then
-  mvn_bin="$(mise where "maven@${FRONTSEAT_MAVEN4}")/apache-maven-${FRONTSEAT_MAVEN4}/bin/mvn"
+  mvn_bin="$(mise where "maven@${MOJOIO_MAVEN4}")/apache-maven-${MOJOIO_MAVEN4}/bin/mvn"
 fi
 
 # usage_goals is space-separated; default to verify.
 read -r -a goals <<< "${usage_goals:-verify}"
 cd "$work"
 echo "[demo] $mvn_bin ${goals[*]}  (in $work)"
-"$mvn_bin" "-Dmaven.ext.class.path=$ext" "${goals[@]}" | grep -E '\[frontseat\]|Tests run:|BUILD|ERROR' || true
+"$mvn_bin" "-Dmaven.ext.class.path=$ext" "${goals[@]}" | grep -E '\[mojo-io\]|Tests run:|BUILD|ERROR' || true

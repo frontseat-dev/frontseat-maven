@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>dev.frontseat.mojoio</groupId>
+    <artifactId>mojo-io-parent</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+  </parent>
+
+  <artifactId>mojo-io-it</artifactId>
+  <name>mojo-io :: Integration Tests</name>
+  <description>
+    Forks real Maven builds of the sample projects under src/it/projects with the extension loaded,
+    and asserts on cache hits, restored outputs and restored project state.
+  </description>
+
+  <properties>
+    <maven.deploy.skip>true</maven.deploy.skip>
+    <maven.install.skip>true</maven.install.skip>
+    <!-- Fork a different Maven for the ITs, e.g. a Maven 4 install (see mise.toml). -->
+    <mojoio.it.maven.home/>
+    <mojoio.it.expectMavenVersion/>
+  </properties>
+
+  <dependencies>
+    <!-- Only here so the reactor builds the extension first; the ITs load its jars directly. -->
+    <dependency>
+      <groupId>dev.frontseat.mojoio</groupId>
+      <artifactId>mojo-io-maven-extension</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <!-- Exposes the extension's runtime jars (extension + cache core) as ${mojoio.ext.classpath}. -->
+        <artifactId>maven-dependency-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>extension-classpath</id>
+            <phase>pre-integration-test</phase>
+            <goals>
+              <goal>build-classpath</goal>
+            </goals>
+            <configuration>
+              <includeGroupIds>dev.frontseat.mojoio</includeGroupIds>
+              <includeScope>test</includeScope>
+              <outputProperty>mojoio.ext.classpath</outputProperty>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
+        <artifactId>maven-failsafe-plugin</artifactId>
+        <executions>
+          <execution>
+            <goals>
+              <goal>integration-test</goal>
+              <goal>verify</goal>
+            </goals>
+          </execution>
+        </executions>
+        <configuration>
+          <systemPropertyVariables>
+            <maven.home>${maven.home}</maven.home>
+            <mojoio.it.maven.home>${mojoio.it.maven.home}</mojoio.it.maven.home>
+            <mojoio.it.expectMavenVersion>${mojoio.it.expectMavenVersion}</mojoio.it.expectMavenVersion>
+            <mojoio.ext.classpath>${mojoio.ext.classpath}</mojoio.ext.classpath>
+            <mojoio.it.projects>${project.basedir}/src/it/projects</mojoio.it.projects>
+            <mojoio.it.work>${project.build.directory}/it</mojoio.it.work>
+            <mojoio.it.localRepo>${settings.localRepository}</mojoio.it.localRepo>
+          </systemPropertyVariables>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+</project>
