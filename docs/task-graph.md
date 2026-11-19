@@ -30,6 +30,7 @@ the goals you want described; `verify` covers the default lifecycle up to packag
       "plugin": "org.apache.maven.plugins:maven-compiler-plugin", "version": "3.13.0",
       "goal": "compile", "executionId": "default-compile", "phase": "compile",
       "declaredBy": "built-in",            // or "plugin …", "project .mvn/plugin-io/x.xml", or null
+      "stamping": "carry",                 // "exact": the version is an input; "carry": only copied (docs/versioning.md)
       "cacheable": true, "reason": null,
       "inputs": [
         { "name": "compileSourceRoots", "kind": "files", "paths": ["{projectRoot}/src/main/java"], "includes": [], "excludes": [] },

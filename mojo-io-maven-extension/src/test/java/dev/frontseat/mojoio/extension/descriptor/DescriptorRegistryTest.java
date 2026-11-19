@@ -39,7 +39,8 @@ class DescriptorRegistryTest {
                 "org.apache.maven.plugins:maven-compiler-plugin:compile",
                 "org.apache.maven.plugins:maven-compiler-plugin:testCompile",
                 "org.apache.maven.plugins:maven-surefire-plugin:test",
-                "org.jacoco:jacoco-maven-plugin:prepare-agent"), builtin.keySet());
+                "org.jacoco:jacoco-maven-plugin:prepare-agent",
+                "org.apache.maven.plugins:maven-jar-plugin:jar"), builtin.keySet());
         builtin.values().forEach(d -> assertTrue(d.cacheable(), d.goal() + ": " + d.notCacheableReason()));
         MojoCacheDescriptor surefire = builtin.get("org.apache.maven.plugins:maven-surefire-plugin:test");
         assertEquals("process-test-classes", surefire.prerequisitePhase());

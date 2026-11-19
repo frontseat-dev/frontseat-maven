@@ -26,15 +26,16 @@ class SchemaTest {
         validate("""
                 <plugin-io xmlns="urn:mojo-io:plugin-io:1.0">
                   <plugin>
-                    <mojo goal="a" prerequisitePhase="compile">
+                    <mojo goal="a" prerequisitePhase="compile" stamping="carry">
                       <inputs>
-                        <files parameter="p"/><classpath parameter="c" excludeParameter="o"/><testClasspath/>
+                        <files parameter="p"/><files expression="${project.file}"/><classpath parameter="c" excludeParameter="o"/><testClasspath/>
                         <resources parameter="r"/><projectProperty nameParameter="n" defaultName="argLine"/>
                       </inputs>
                       <outputs>
                         <directory parameter="o" includes="**/*.class"/>
                         <copiedResources resourcesParameter="r" outputDirectoryParameter="o"/>
                         <javaagentDestFiles parameter="argLine"/>
+                        <file parameter="outputDirectory" name="{finalName}{-classifier}.jar"/>
                       </outputs>
                       <ignoredParameters>x</ignoredParameters>
                     </mojo>

@@ -32,6 +32,30 @@ public final class Outputs {
         };
     }
 
+    /**
+     * One file in the directory named by {@code parameter}. {@code nameTemplate} uses {@code {param}} for a
+     * parameter's value and {@code {-param}} for {@code "-" + value} when the value is not empty, e.g.
+     * {@code {finalName}{-classifier}.jar}.
+     */
+    public static OutputSpec file(String parameter, String nameTemplate) {
+        return ctx -> {
+            List<Path> dirs = ctx.parameterPaths(parameter);
+            if (dirs.size() != 1) {
+                throw new NotCacheableException("expected one directory in '" + parameter + "', got " + dirs);
+            }
+            Matcher m = Pattern.compile("\\{(-?)([A-Za-z0-9_.]+)}").matcher(nameTemplate);
+            StringBuilder name = new StringBuilder();
+            while (m.find()) {
+                Object v = ctx.parameter(m.group(2));
+                String s = v == null ? "" : v.toString();
+                m.appendReplacement(name, Matcher.quoteReplacement(
+                        m.group(1).isEmpty() ? s : s.isEmpty() ? "" : "-" + s));
+            }
+            m.appendTail(name);
+            return List.of(new ResolvedOutput(parameter, dirs.get(0).resolve(name.toString()), List.of(), List.of()));
+        };
+    }
+
     /** What a resources mojo copies: each selected file, mapped to the output directory/targetPath. */
     public static OutputSpec copiedResources(String resourcesParameter, String outputDirectoryParameter) {
         return ctx -> {

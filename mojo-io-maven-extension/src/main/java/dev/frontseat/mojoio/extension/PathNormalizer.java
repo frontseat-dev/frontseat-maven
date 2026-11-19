@@ -32,12 +32,36 @@ public final class PathNormalizer {
     private static final Pattern REPO_REFERENCE = Pattern.compile(Pattern.quote(M2REPO) + "([^\\s=,;:\"'" + "]+)");
 
     private final List<String[]> roots = new ArrayList<>();
+    private final dev.frontseat.mojoio.cache.Stamps stamps;
 
     public PathNormalizer(Path basedir, Path root, Path localRepo) {
+        this(basedir, root, localRepo, dev.frontseat.mojoio.cache.Stamps.NONE);
+    }
+
+    /**
+     * With {@code stamps}, stamp values (e.g. the project version) are tokenized too, as
+     * {@code @@STAMP:name@@}, except inside local-repository paths, whose versions are dependency
+     * versions rather than stamps.
+     */
+    public PathNormalizer(Path basedir, Path root, Path localRepo, dev.frontseat.mojoio.cache.Stamps stamps) {
+        this.stamps = stamps;
         add(BASEDIR, basedir);
         add(ROOT, root);
         add(M2REPO, localRepo);
         roots.sort(Comparator.comparingInt((String[] r) -> r[1].length()).reversed());
+    }
+
+    private PathNormalizer(List<String[]> roots, dev.frontseat.mojoio.cache.Stamps stamps) {
+        this.roots.addAll(roots);
+        this.stamps = stamps;
+    }
+
+    public PathNormalizer withStamps(dev.frontseat.mojoio.cache.Stamps stamps) {
+        return new PathNormalizer(roots, stamps);
+    }
+
+    public dev.frontseat.mojoio.cache.Stamps stamps() {
+        return stamps;
     }
 
     private void add(String token, Path path) {
@@ -55,14 +79,25 @@ public final class PathNormalizer {
             String regex = Pattern.quote(root[1]) + "(?=[/\\\\]|$|[^A-Za-z0-9._\\-])";
             result = result.replaceAll(regex, Matcher.quoteReplacement(root[0]));
         }
-        return result.replace('\\', '/');
+        result = result.replace('\\', '/');
+        if (stamps.isEmpty()) {
+            return result;
+        }
+        StringBuilder sb = new StringBuilder();
+        Matcher m = REPO_REFERENCE.matcher(result);
+        int last = 0;
+        while (m.find()) {
+            sb.append(stamps.tokenize(result.substring(last, m.start()))).append(m.group());
+            last = m.end();
+        }
+        return sb.append(stamps.tokenize(result.substring(last))).toString();
     }
 
     public String denormalize(String value) {
         if (value == null) {
             return null;
         }
-        String result = value;
+        String result = stamps.detokenize(value);
         for (String[] root : roots) {
             result = result.replace(root[0], root[1].replace('\\', '/'));
         }

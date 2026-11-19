@@ -126,7 +126,7 @@ public final class PluginIoReader {
         try {
             return new MojoIo(goal, cacheable == null || Boolean.parseBoolean(cacheable), attr(mojo, "reason"),
                     attr(mojo, "prerequisitePhase"), declarations(mojo, "inputs"), declarations(mojo, "outputs"),
-                    ignored);
+                    ignored, "carry".equals(attr(mojo, "stamping")));
         } catch (PluginIoException e) {
             throw new PluginIoException(source + ": " + e.getMessage(), e);
         }

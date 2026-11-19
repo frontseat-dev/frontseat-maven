@@ -75,7 +75,7 @@ storing an entry, the mojo just runs.
 | `maven-surefire-plugin` | `test` | ✅ | 3.5.2 | 2.22.2, 3.0.0, 3.2.5, 3.5.2, 3.5.4 | reports, JaCoCo `destfile` | Tests that use the network, a DB, env vars or files outside the project get cached too: override with `.mvn/plugin-io/`. With `testFailureIgnore`, failures are cached. |
 | `jacoco-maven-plugin` | `prepare-agent` | ✅ | 0.8.12 | 0.8.7, 0.8.10, 0.8.12, 0.8.13, 0.8.14 | `argLine` | A hit requires the agent jar in the local repository; otherwise it counts as a miss. |
 | `jacoco-maven-plugin` | `report` | ➖ | | | | Next candidate: inputs `jacoco.exec` + classes, output `site/jacoco`. |
-| `maven-jar-plugin` | `jar` | ➖ | | | | Runs, but cheap. Downstream modules no longer miss when it re-packs (archives are hashed by entries, not timestamps). |
+| `maven-jar-plugin` | `jar` | ✅ | 3.4.2 | | the jar, artifact file | `carry`: after a version bump the restored jar is renamed and its `pom.properties`, pom and manifest are restamped. `test-jar` is not declared yet (it attaches an artifact). |
 | `maven-failsafe-plugin` | `integration-test`, `verify` | ➖ | | | | Same shape as surefire; usually needs a per-project decision. |
 | `maven-source-plugin` | `jar` | ➖ | | | | Forks a lifecycle: skipped by design today. `jar-no-fork` is the candidate. |
 | `maven-javadoc-plugin` | `javadoc`, `jar` | ➖ | | | | |
@@ -149,6 +149,7 @@ live service, drop a file in `.mvn/plugin-io/`:
 | `mojoio.state.enabled` | `true` | Record project-state files in `target/mojo-io/state/` and replay them for executions that don't run. |
 | `mojoio.graph.output` | unset | Write the task graph to this file instead of running mojos (dry run). |
 | `mojoio.cache.enabled` | `true` | The built-in local cache. |
+| `mojoio.stamp.properties` | unset | Extra stamp values besides `project.version`, e.g. `buildNumber,git.commit.id` ([versioning](docs/versioning.md)). |
 | `mojoio.cache.dir` | `~/.m2/mojo-io-cache` | Local cache location. |
 | `mojoio.cache.read` / `mojoio.cache.write` | `true` | E.g. `write=false` for a read-only CI consumer. |
 | `mojoio.prerequisites` | `true` | Expand directly-invoked goals with their lifecycle prerequisites. |
@@ -168,7 +169,7 @@ Every cacheable execution writes its key's inputs, and which declaration was use
 | `mojo-io-maven-extension` | The core extension: execution strategy, declaration lookup, project-state diff, prerequisites. |
 | `mojo-io-it` | Integration tests that fork real Maven 3.9 / 4 builds of the projects in `src/it/projects`. |
 | `mise.toml`, `mise-tasks/` | Toolchain and tasks. |
-| `docs/` | [Design notes](docs/design.md), formats ([plugin-io](docs/plugin-io.md), [task graph](docs/task-graph.md), [state](docs/state-format.md)), [Maven 4 proposal](docs/maven4-proposal.md). |
+| `docs/` | [Design notes](docs/design.md), [versioning](docs/versioning.md), formats ([plugin-io](docs/plugin-io.md), [task graph](docs/task-graph.md), [state](docs/state-format.md)), [Maven 4 proposal](docs/maven4-proposal.md). |
 
 ## Development
 

@@ -30,9 +30,11 @@ public final class MojoCacheDescriptor {
     private final Set<String> ignoredParameters;
     private final String prerequisitePhase;
     private final String source;
+    private final boolean stampingCarry;
 
     private MojoCacheDescriptor(Builder b) {
         this.source = b.source;
+        this.stampingCarry = b.stampingCarry;
         this.pluginKey = b.pluginKey;
         this.goal = b.goal;
         this.notCacheableReason = b.notCacheableReason;
@@ -76,6 +78,14 @@ public final class MojoCacheDescriptor {
         return ignoredParameters;
     }
 
+    /**
+     * {@code stamping="carry"}: stamp values only travel into outputs, so they are tokenized in the key
+     * and rewritten on restore. Otherwise they are part of the key.
+     */
+    public boolean stampingCarry() {
+        return stampingCarry;
+    }
+
     /** Where this descriptor came from (built-in, plugin, project file); shown in key manifests. */
     public String source() {
         return source;
@@ -95,6 +105,7 @@ public final class MojoCacheDescriptor {
         private final Set<String> ignored = new LinkedHashSet<>();
         private String prerequisitePhase;
         private String source = "code";
+        private boolean stampingCarry;
 
         private Builder(String pluginKey, String goal) {
             this.pluginKey = pluginKey;
@@ -117,6 +128,11 @@ public final class MojoCacheDescriptor {
          */
         public Builder ignore(String... parameters) {
             ignored.addAll(List.of(parameters));
+            return this;
+        }
+
+        public Builder stampingCarry(boolean carry) {
+            this.stampingCarry = carry;
             return this;
         }
 

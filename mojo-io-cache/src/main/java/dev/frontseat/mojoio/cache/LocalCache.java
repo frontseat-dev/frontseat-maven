@@ -55,16 +55,35 @@ public final class LocalCache {
         }
     }
 
+    /** A file to store: its (possibly stamp-tokenized) relative path, where it is now, and its restamp mode. */
+    public record StoredFile(String path, Path source, Restamping.Mode mode) {}
+
     /**
      * Stores an entry. {@code files} maps each output path (relative to the project base directory)
      * to the file on disk to copy into the store.
      */
     public CacheEntry store(String key, String mojo, Map<String, Path> files, List<CacheEntry.StateRecord> state,
                             String keyManifest) {
+        List<StoredFile> stored = new ArrayList<>();
+        files.forEach((path, source) -> stored.add(new StoredFile(path, source, Restamping.Mode.RAW)));
+        return store(key, mojo, stored, state, Map.of(), keyManifest);
+    }
+
+    /** Stores a redirect: outputs for {@code key} are pinned to exact stamp values (see {@link CacheEntry}). */
+    public void storeRedirect(String key, String mojo, String reason) {
+        try {
+            writeAtomically(entryPath(key), CacheEntry.redirect(key, mojo, reason).encode());
+        } catch (IOException e) {
+            throw new UncheckedIOException("Cannot store cache entry " + key, e);
+        }
+    }
+
+    public CacheEntry store(String key, String mojo, List<StoredFile> files, List<CacheEntry.StateRecord> state,
+                            Map<String, String> stamps, String keyManifest) {
         List<CacheEntry.OutputFile> outputs = new ArrayList<>();
         try {
-            for (Map.Entry<String, Path> e : files.entrySet()) {
-                Path source = e.getValue();
+            for (StoredFile e : files) {
+                Path source = e.source();
                 String hash = Hashing.sha256(source);
                 Path blob = blobPath(hash);
                 if (!Files.exists(blob)) {
@@ -73,9 +92,9 @@ public final class LocalCache {
                     Files.copy(source, tmp, StandardCopyOption.REPLACE_EXISTING);
                     moveAtomically(tmp, blob);
                 }
-                outputs.add(new CacheEntry.OutputFile(e.getKey(), hash, Files.size(source)));
+                outputs.add(new CacheEntry.OutputFile(e.path(), hash, Files.size(source), e.mode()));
             }
-            CacheEntry entry = new CacheEntry(key, mojo, outputs, state);
+            CacheEntry entry = new CacheEntry(key, mojo, outputs, state, stamps, null);
             writeAtomically(entryPath(key), entry.encode());
             if (keyManifest != null) {
                 writeAtomically(keyManifestPath(key), keyManifest);
@@ -88,14 +107,22 @@ public final class LocalCache {
 
     /** Copies every output file of {@code entry} into {@code baseDir}. */
     public void restoreFiles(CacheEntry entry, Path baseDir) {
+        restoreFiles(entry, baseDir, Stamps.NONE);
+    }
+
+    /**
+     * Copies every output file of {@code entry} into {@code baseDir}, rewriting stamp tokens in paths and
+     * stamp values in restampable content for the {@code current} stamps.
+     */
+    public void restoreFiles(CacheEntry entry, Path baseDir, Stamps current) {
         try {
             for (CacheEntry.OutputFile f : entry.files()) {
-                Path target = baseDir.resolve(f.path()).normalize();
+                Path target = baseDir.resolve(current.detokenize(f.path())).normalize();
                 if (!target.startsWith(baseDir)) {
                     throw new IllegalStateException("Cache entry escapes project directory: " + f.path());
                 }
                 Files.createDirectories(target.getParent());
-                Files.copy(blobPath(f.hash()), target, StandardCopyOption.REPLACE_EXISTING);
+                Restamping.restamp(blobPath(f.hash()), target, f.mode(), entry.stamps(), current.values());
             }
         } catch (IOException e) {
             throw new UncheckedIOException("Cannot restore cache entry " + entry.key(), e);

@@ -57,6 +57,11 @@
         <plugin>
           <artifactId>maven-surefire-plugin</artifactId>
           <version>3.5.2</version>
+          <configuration>
+            <systemPropertyVariables>
+              <expectedVersion>${project.version}</expectedVersion>
+            </systemPropertyVariables>
+          </configuration>
         </plugin>
         <plugin>
           <artifactId>maven-jar-plugin</artifactId>

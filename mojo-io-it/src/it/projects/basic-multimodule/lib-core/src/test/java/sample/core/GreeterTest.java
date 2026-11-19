@@ -13,6 +13,6 @@ class GreeterTest {
 
     @Test
     void resourceIsFiltered() {
-        assertEquals("1.0.0-SNAPSHOT", new Greeter().version());
+        assertEquals(System.getProperty("expectedVersion"), new Greeter().version());
     }
 }

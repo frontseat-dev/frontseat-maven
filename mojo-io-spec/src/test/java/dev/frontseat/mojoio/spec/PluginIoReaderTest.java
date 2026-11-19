@@ -21,7 +21,7 @@ class PluginIoReaderTest {
     private static final String DOC = """
             <plugin-io xmlns="urn:mojo-io:plugin-io:1.0">
               <plugin groupId="org.example" artifactId="gen-maven-plugin">
-                <mojo goal="generate" prerequisitePhase="initialize">
+                <mojo goal="generate" prerequisitePhase="initialize" stamping="carry">
                   <inputs>
                     <files parameter="schemaDirectory"/>
                     <classpath parameter="pluginClasspath" excludeParameter="outputDirectory"/>
@@ -49,9 +49,11 @@ class PluginIoReaderTest {
         assertEquals("outputDirectory", generate.inputs().get(1).required("excludeParameter"));
         assertEquals("**/*.java", generate.outputs().get(0).required("includes"));
         assertEquals(Set.of("verbose", "quiet", "logLevel"), generate.ignoredParameters());
+        assertTrue(generate.stampingCarry());
 
         MojoIo publish = plugin.mojo("publish").orElseThrow();
         assertFalse(publish.cacheable());
+        assertFalse(publish.stampingCarry(), "exact is the default");
         assertEquals("talks to a server", publish.reason());
     }
 
