@@ -13,7 +13,7 @@ become part of Maven itself.
 
 Maven 3.9 resolves `org.apache.maven.plugin.MojosExecutionStrategy` from the container and passes it
 every project's list of mojo executions plus a `MojoExecutionRunner` that runs one of them. We register
-`FrontseatMojosExecutionStrategy` with `@Priority(10)`, so it wins over `DefaultMojosExecutionStrategy`.
+`MojoIoExecutionStrategy` with `@Priority(10)`, so it wins over `DefaultMojosExecutionStrategy`.
 `maven-build-cache-extension` uses the same mechanism. The extension is loaded as a core extension
 (`.mvn/extensions.xml` or `-Dmaven.ext.class.path`). Its realm has maven-core as parent, so internal
 components such as `LifecycleDependencyResolver` and `LifecycleExecutionPlanCalculator` can be
@@ -76,7 +76,7 @@ If *every* execution in the list came from the CLI (`mvn surefire:test`), the st
 lifecycle plan up to the deepest `prerequisitePhase` of the requested goals and prepends it, minus
 the goals already requested. With a warm cache those prerequisites are all restores. Mixed
 invocations (`mvn test surefire:test`) are left alone. To turn this off, set
-`-Dfrontseat.prerequisites=false`.
+`-Dmojoio.prerequisites=false`.
 
 ## Cache layout
 
@@ -96,7 +96,7 @@ invocations (`mvn test surefire:test`) are left alone. To turn this off, set
   Without it, classpath inputs silently covered only output directories, so a change in an upstream
   module didn't invalidate its dependents.
 - **Self-referential classpaths.** `compilePath` starts with the mojo's own `target/classes`.
-- **Unrelated `-D` flags.** Filtering hashes user properties, so build plumbing (`frontseat.*`,
+- **Unrelated `-D` flags.** Filtering hashes user properties, so build plumbing (`mojoio.*`,
   `maven.repo.local`, …) is excluded.
 
 ## Known limitations of the first slice
@@ -114,7 +114,7 @@ invocations (`mvn test surefire:test`) are left alone. To turn this off, set
    around each miss. Also clean declared outputs before a miss.
 2. **Remote cache**: an HTTP or REAPI-compatible CAS + action cache behind the same `LocalCache`
    API, with local as an L1 cache.
-3. **Graph export**: emit the per-module execution graph with inputs and outputs for Nx or Frontseat
+3. **Graph export**: emit the per-module execution graph with inputs and outputs for any orchestrator (Nx, Bazel, Frontseat, …) via a neutral, versioned JSON format
    (proposal P4).
 4. **Upstreaming**: offer `plugin-io.xml` to the compiler, resources and surefire plugins, and
    discuss P1–P3 of the [proposal](maven4-proposal.md) with the Maven project.
