@@ -48,7 +48,7 @@ public class PrerequisiteExpander {
                 || executions.stream().anyMatch(m -> m.getSource() != MojoExecution.Source.CLI)) {
             return executions;
         }
-        String phase = deepestPrerequisite(executions);
+        String phase = deepestPrerequisite(executions, session);
         if (phase == null) {
             return executions;
         }
@@ -75,12 +75,12 @@ public class PrerequisiteExpander {
         return expanded;
     }
 
-    private String deepestPrerequisite(List<MojoExecution> executions) {
+    private String deepestPrerequisite(List<MojoExecution> executions, MavenSession session) {
         Lifecycle defaultLifecycle = lifecycles.get("compile");
         List<String> phases = defaultLifecycle == null ? List.of() : defaultLifecycle.getPhases();
         String deepest = null;
         for (MojoExecution m : executions) {
-            String phase = registry.find(m).map(MojoCacheDescriptor::prerequisitePhase).orElse(null);
+            String phase = registry.find(m, session).map(MojoCacheDescriptor::prerequisitePhase).orElse(null);
             if (phase != null && (deepest == null || phases.indexOf(phase) > phases.indexOf(deepest))) {
                 deepest = phase;
             }

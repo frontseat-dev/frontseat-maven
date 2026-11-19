@@ -13,6 +13,7 @@
   <description>Mojo-level build cache for Maven 3.9+, delivered as a core extension.</description>
 
   <modules>
+    <module>frontseat-plugin-io</module>
     <module>frontseat-cache-core</module>
     <module>frontseat-maven-extension</module>
     <module>frontseat-it</module>
@@ -30,6 +31,11 @@
 
   <dependencyManagement>
     <dependencies>
+      <dependency>
+        <groupId>dev.frontseat.maven</groupId>
+        <artifactId>frontseat-plugin-io</artifactId>
+        <version>${project.version}</version>
+      </dependency>
       <dependency>
         <groupId>dev.frontseat.maven</groupId>
         <artifactId>frontseat-cache-core</artifactId>

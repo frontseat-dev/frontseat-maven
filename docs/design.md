@@ -3,8 +3,11 @@
 ## Goal
 
 Nx-style task caching for Maven, at the granularity of a single mojo execution, without forking
-Maven. Plugins stay unchanged: what a mojo reads and writes is declared in a *descriptor* that
-lives in the extension.
+Maven. Plugins stay unchanged: what a mojo reads and writes is declared in
+[`plugin-io.xml`](plugin-io.md). Those declarations come from the project (`.mvn/plugin-io/`), from
+the plugin's own jar, or from the extension's built-in file, in that order of precedence. The same
+jar runs on Maven 3.9 and 4. [maven4-proposal.md](maven4-proposal.md) describes how this could
+become part of Maven itself.
 
 ## Hook point
 
@@ -18,7 +21,8 @@ injected.
 
 ## Per execution
 
-1. **Descriptor lookup** by `groupId:artifactId:goal`. No descriptor: run. Aggregators and mojos with
+1. **Declaration lookup** by `groupId:artifactId:goal` (project → plugin jar → built-in), mapped
+   to an executable descriptor. An unknown input/output kind makes the mojo non-cacheable. No descriptor: run. Aggregators and mojos with
    forked executions: run.
 2. **Resolve dependencies** for the mojo's `requiresDependencyResolution` scope *before* it runs, and
    set the project's artifact filter like `MojoExecutor` does. On a hit the runner is never called,
@@ -110,7 +114,10 @@ invocations (`mvn test surefire:test`) are left alone. To turn this off, set
    around each miss. Also clean declared outputs before a miss.
 2. **Remote cache**: an HTTP or REAPI-compatible CAS + action cache behind the same `LocalCache`
    API, with local as an L1 cache.
-3. **Graph export**: emit the per-module execution graph with inputs and outputs for Nx or Frontseat.
-4. **Descriptor coverage**: the long tail of plugins (jar, source, javadoc, failsafe, protobuf,
-   build-helper, …). Descriptors could also be loaded from a file in `.mvn/`.
-5. **Edge cases**: forked executions, `@aggregator` mojos, plugins writing outside `target/`.
+3. **Graph export**: emit the per-module execution graph with inputs and outputs for Nx or Frontseat
+   (proposal P4).
+4. **Upstreaming**: offer `plugin-io.xml` to the compiler, resources and surefire plugins, and
+   discuss P1–P3 of the [proposal](maven4-proposal.md) with the Maven project.
+5. **Declaration coverage**: the long tail of plugins (jar, source, javadoc, failsafe, protobuf,
+   build-helper, …), ideally shipped by the plugins themselves.
+6. **Edge cases**: forked executions, `@aggregator` mojos, plugins writing outside `target/`.

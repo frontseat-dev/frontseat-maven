@@ -52,7 +52,7 @@ public final class Inputs {
      */
     public static InputSpec classpath(String parameter, String ownOutputParameter) {
         return (ctx, key) -> {
-            List<Path> own = ctx.parameterPaths(ownOutputParameter);
+            List<Path> own = ownOutputParameter == null ? List.of() : ctx.parameterPaths(ownOutputParameter);
             List<String> hashes = new ArrayList<>();
             for (Path p : ctx.parameterPaths(parameter)) {
                 if (own.contains(p)) {
@@ -88,7 +88,7 @@ public final class Inputs {
      */
     public static InputSpec projectPropertyNamedBy(String parameter, String defaultName) {
         return (ctx, key) -> {
-            Object configured = ctx.parameter(parameter);
+            Object configured = parameter == null ? null : ctx.parameter(parameter);
             String name = configured == null || configured.toString().isBlank() ? defaultName : configured.toString();
             String value = ctx.project().getProperties().getProperty(name);
             key.add("input.property." + name, ctx.normalizer().normalize(value));

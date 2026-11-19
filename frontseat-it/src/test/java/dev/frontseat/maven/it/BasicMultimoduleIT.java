@@ -95,4 +95,27 @@ class BasicMultimoduleIT {
         assertEquals("MISS", result.outcome("app", "compiler:compile"), result.log());
         assertEquals("HIT", result.outcome("app", "resources:testResources"), result.log());
     }
+
+    @Test
+    void projectDeclarationsOverrideBuiltins() throws Exception {
+        Path cache = MavenBuild.cacheDir("override");
+        MavenBuild build = MavenBuild.checkout(PROJECT, "override", "checkout", cache);
+        Path dir = Files.createDirectories(build.dir().resolve(".mvn/plugin-io"));
+        Files.writeString(dir.resolve("surefire.xml"), """
+                <plugin-io xmlns="https://frontseat.dev/xsd/plugin-io/1.0">
+                  <plugin groupId="org.apache.maven.plugins" artifactId="maven-surefire-plugin">
+                    <mojo goal="test" cacheable="false" reason="integration tests hit a live service"/>
+                  </plugin>
+                </plugin-io>
+                """);
+
+        build.run("test");
+        MavenBuild.Result again = build.run("test");
+        for (String module : MODULES) {
+            assertEquals("HIT", again.outcome(module, "compiler:compile"), again.log());
+            assertEquals("SKIP", again.outcome(module, "surefire:test"), again.log());
+        }
+        assertTrue(again.log().contains("integration tests hit a live service"), again.log());
+        assertTrue(again.log().contains("T E S T S"), "tests must run every time");
+    }
 }

@@ -1,0 +1,95 @@
+# plugin-io.xml: declaring what a mojo reads and writes
+
+`plugin-io.xml` describes the inputs and outputs of Maven mojos **in terms of their parameters**.
+Because it's tied to parameters, one declaration holds for every configuration of the plugin. It is
+the contract that lets a tool cache a mojo execution, restore it in a different checkout, or put it
+into a monorepo task graph without running it.
+
+The format lives in its own dependency-free module (`frontseat-plugin-io`), with an XSD at
+`dev/frontseat/maven/pluginio/plugin-io-1.0.xsd`. It's meant to be adopted as is by plugins, by
+Maven core and by other tools. See the [Maven 4 proposal](maven4-proposal.md).
+
+## Where declarations come from
+
+The first source that mentions a goal wins outright:
+
+1. **Project**: `.mvn/plugin-io/*.xml` at the multi-module root. Use it to fix or veto a declaration
+   without waiting for a release, for example tests that talk to a live service.
+2. **Plugin**: `META-INF/maven/plugin-io.xml` inside the plugin's own jar. Here `<plugin>` may omit
+   its coordinates.
+3. **Built-in**: `builtin-plugin-io.xml`, shipped with the extension, for common plugins that don't
+   ship their own declarations yet.
+
+Mojos nobody declares always run. A mojo whose declarations use a kind the reader doesn't know is
+also treated as not cacheable.
+
+## Example
+
+```xml
+<plugin-io xmlns="https://frontseat.dev/xsd/plugin-io/1.0">
+  <plugin groupId="org.apache.maven.plugins" artifactId="maven-compiler-plugin">
+    <mojo goal="compile" prerequisitePhase="process-resources">
+      <inputs>
+        <files parameter="compileSourceRoots"/>
+        <classpath parameter="compilePath" excludeParameter="outputDirectory"/>
+      </inputs>
+      <outputs>
+        <directory parameter="outputDirectory" includes="**/*.class"/>
+        <directory parameter="generatedSourcesDirectory"/>
+      </outputs>
+      <ignoredParameters>compileSourceRoots, compilePath, verbose, staleMillis</ignoredParameters>
+    </mojo>
+    <mojo goal="help" cacheable="false" reason="prints to the console only"/>
+  </plugin>
+</plugin-io>
+```
+
+## Semantics
+
+Without any declaration, the reader hashes the **effective configuration**: every parameter,
+evaluated the way Maven configures the mojo (configured expression, else `default-value`), with
+absolute paths made relative to the module, the multi-module root or the local repository. So
+declarations only need to cover what that hash can't see:
+
+| Element | Meaning |
+|---|---|
+| `<inputs>` | Things whose **content** matters. A parameter named here is hashed by content (and normally also listed in `ignoredParameters`, so its path doesn't count). |
+| `<outputs>` | Files the mojo produces. They're declared rather than diffed, because a mojo that finds its outputs up to date writes nothing. |
+| `<ignoredParameters>` | Parameters that can't change outputs: logging, process plumbing, and parameters already hashed by content. Maven objects (`project`, `session`, `mojoExecution`, …) are always ignored. |
+| `cacheable="false" reason="…"` | The mojo has effects that can't be captured: system properties, static state, the network, files outside the project. A reason is required. |
+| `prerequisitePhase` | When the goal is invoked directly (`mvn surefire:test`), this phase runs or is restored first. |
+
+### Input kinds
+
+| Kind | Attributes | Hashes |
+|---|---|---|
+| `files` | `parameter` | Content of the files/trees a path or path-list parameter names. |
+| `classpath` | `parameter`, `excludeParameter?` | An ordered classpath, by content not location. `excludeParameter` skips an entry, usually the mojo's own output directory. |
+| `testClasspath` | – | The project's resolved test classpath. For mojos that build it internally. |
+| `resources` | `parameter` | A `List<Resource>`: settings plus selected files. With filtering, also project coordinates, project properties and user properties. |
+| `projectProperty` | `nameParameter?`, `defaultName` | The current value of a project property the mojo reads and rewrites. |
+
+### Output kinds
+
+| Kind | Attributes | Collects |
+|---|---|---|
+| `directory` | `parameter`, `includes?` (default `**`) | Files under a directory parameter matching Ant patterns. |
+| `copiedResources` | `resourcesParameter`, `outputDirectoryParameter` | The files a resources mojo copies. |
+| `javaagentDestFiles` | `parameter` | `destfile=` targets of `-javaagent:` options in a command-line parameter (coverage data). |
+
+`files`, `classpath` and `directory` are the **core** kinds. Any well-designed mojo can be described
+with them alone. The others are **derived** kinds: they exist because today's plugins compute
+those values internally instead of exposing them as parameters.
+
+### Project state
+
+Restoring files isn't enough: mojos also change the in-memory project. For example, the compiler
+adds a generated-sources root and JaCoCo sets `argLine`. The format doesn't declare these. Instead
+the reader records them (on Maven 3 by diffing the project, see [design](design.md)). The
+[proposal](maven4-proposal.md) shows how Maven 4's `ProjectManager` makes this exact.
+
+## For plugin authors
+
+Add `src/main/resources/META-INF/maven/plugin-io.xml` to the plugin, with no coordinates on `<plugin>`.
+Keep declarations next to the code so they change together. Validate the file against the XSD in your
+build.

@@ -20,6 +20,10 @@
   <dependencies>
     <dependency>
       <groupId>dev.frontseat.maven</groupId>
+      <artifactId>frontseat-plugin-io</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>dev.frontseat.maven</groupId>
       <artifactId>frontseat-cache-core</artifactId>
     </dependency>
 
