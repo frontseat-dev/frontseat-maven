@@ -43,7 +43,9 @@ final class PluginIoMapper {
                     : Inputs.files(d.required("parameter"));
             case "classpath" -> Inputs.classpath(d.required("parameter"), d.attribute("excludeParameter").orElse(null));
             case "testClasspath" -> Inputs.testClasspath();
-            case "resources" -> Inputs.resources(d.required("parameter"));
+            case "resources" -> d.attribute("expression").isPresent()
+                    ? Inputs.resourcesAt(d.required("expression"))
+                    : Inputs.resources(d.required("parameter"));
             case "projectProperty" -> Inputs.projectPropertyNamedBy(d.attribute("nameParameter").orElse(null),
                     d.required("defaultName"));
             default -> throw new PluginIoException("unknown input kind <" + d.kind() + ">");

@@ -41,8 +41,14 @@ public final class FileTrees {
         if (!Files.isDirectory(path)) {
             return ABSENT;
         }
+        List<Path> files = listFiles(path);
+        if (files.isEmpty()) {
+            // An empty directory is equivalent to a missing one: a restored build has no empty
+            // directories (only files are cached), a fresh one often does (e.g. javac's annotations dir).
+            return ABSENT;
+        }
         StringBuilder manifest = new StringBuilder();
-        for (Path file : listFiles(path)) {
+        for (Path file : files) {
             manifest.append(relative(path, file)).append('\0').append(fileHash(file, filter)).append('\n');
         }
         return Hashing.sha256(manifest.toString());

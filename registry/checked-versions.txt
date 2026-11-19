@@ -1,0 +1,15 @@
+# Plugin versions that `mise run registry:check` verifies the built-in declarations against
+# (mojo-io-maven-extension/src/main/resources/META-INF/mojo-io/builtin-plugin-io.xml).
+# Every parameter a declaration references must exist on the goal in each listed version.
+# Format: groupId:artifactId version...
+# A line starting with "!" lists versions the declarations are known NOT to fit; the check expects
+# them to fail (and tells you when one starts passing). At runtime such mojos simply run uncached.
+org.apache.maven.plugins:maven-resources-plugin 3.1.0 3.2.0 3.3.0 3.3.1 4.0.0-beta-1
+org.apache.maven.plugins:maven-compiler-plugin 3.8.1 3.10.1 3.11.0 3.12.1 3.13.0 3.14.0
+# 4.x builds the classpath through the Maven 4 API: there is no compilePath/testPath parameter.
+!org.apache.maven.plugins:maven-compiler-plugin 4.0.0-beta-2
+org.apache.maven.plugins:maven-surefire-plugin 2.22.2 3.0.0 3.2.5 3.5.2 3.5.4
+org.apache.maven.plugins:maven-failsafe-plugin 2.22.2 3.0.0 3.2.5 3.5.2 3.5.4
+org.apache.maven.plugins:maven-jar-plugin 3.2.2 3.3.0 3.4.1 3.4.2
+org.apache.maven.plugins:maven-source-plugin 3.2.1 3.3.0 3.3.1
+org.jacoco:jacoco-maven-plugin 0.8.7 0.8.10 0.8.12 0.8.13 0.8.14

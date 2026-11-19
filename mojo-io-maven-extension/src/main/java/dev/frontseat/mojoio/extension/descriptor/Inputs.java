@@ -21,15 +21,7 @@ public final class Inputs {
 
     /** Files or directory trees a Maven expression evaluates to, e.g. {@code ${project.file}}. */
     public static InputSpec filesAt(String expression) {
-        return ctx -> {
-            Object value = ctx.evaluateExpression(expression);
-            List<Path> paths = new ArrayList<>();
-            if (value != null && !value.toString().isBlank()) {
-                Path p = Path.of(value.toString());
-                paths.add(p.isAbsolute() ? p : ctx.basedir().resolve(p));
-            }
-            return List.of(ResolvedInput.files(expression, paths));
-        };
+        return ctx -> List.of(ResolvedInput.files(expression, ctx.paths(ctx.evaluateExpression(expression))));
     }
 
     /**
@@ -94,11 +86,22 @@ public final class Inputs {
      * Hashing only referenced expressions keeps keys stable across Maven-internal properties.
      */
     public static InputSpec resources(String parameter) {
+        return resources(parameter, null);
+    }
+
+    /** Resources from a Maven expression instead of a parameter, e.g. {@code ${project.resources}}. */
+    public static InputSpec resourcesAt(String expression) {
+        return resources(expression, expression);
+    }
+
+    private static InputSpec resources(String parameter, String sourceExpression) {
         return ctx -> {
             List<ResolvedInput> result = new ArrayList<>();
             java.util.TreeSet<String> expressions = new java.util.TreeSet<>();
             int i = 0;
-            for (Resource r : resourceList(ctx, parameter)) {
+            List<Resource> list = sourceExpression == null ? resourceList(ctx, parameter)
+                    : asResources(ctx.evaluateExpression(sourceExpression), sourceExpression);
+            for (Resource r : list) {
                 List<String> excludes = new ArrayList<>(r.getExcludes());
                 excludes.addAll(AntPattern.DEFAULT_EXCLUDES);
                 String name = parameter + "[" + i++ + "]";
@@ -143,14 +146,17 @@ public final class Inputs {
         return found;
     }
 
-    @SuppressWarnings("unchecked")
     static List<Resource> resourceList(ExecutionContext ctx, String parameter) throws NotCacheableException {
-        Object value = ctx.parameter(parameter);
+        return asResources(ctx.parameter(parameter), "parameter '" + parameter + "'");
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<Resource> asResources(Object value, String what) throws NotCacheableException {
         if (value == null) {
             return List.of();
         }
         if (!(value instanceof List<?> list) || !list.stream().allMatch(o -> o instanceof Resource)) {
-            throw new NotCacheableException("parameter '" + parameter + "' is not a list of resources");
+            throw new NotCacheableException(what + " is not a list of resources");
         }
         return (List<Resource>) list;
     }

@@ -55,6 +55,29 @@ class ToolAgnosticIT {
                 "without state replay the restored build should lose project state\n" + control.log());
     }
 
+    /**
+     * Restoring the packaged target/ directories is enough to install: the main artifact file and the
+     * attached test and source jars all come from replayed state, no mojo before install runs.
+     */
+    @Test
+    void restoredPackageInstallsWithAttachedArtifacts() throws Exception {
+        Path cache = MavenBuild.cacheDir("restore-install");
+        MavenBuild a = MavenBuild.checkout(PROJECT, "restore-install", "a", cache);
+        a.run("package", NO_CACHE, "-DskipTests");
+
+        Path installed = Path.of(System.getProperty("mojoio.it.localRepo"),
+                "com/example/samples/lib-core/1.0.0-SNAPSHOT");
+        MavenBuild.deleteTree(installed);
+        MavenBuild b = MavenBuild.checkout(PROJECT, "restore-install", "b", cache);
+        b.copyTargetsFrom(a, "lib-core", "app");
+        MavenBuild.Result result = b.run("install:install", NO_CACHE, "-Dmojoio.prerequisites=false");
+        assertFalse(result.log().contains("maven-jar-plugin:3.4.2:jar ("), "nothing is re-packaged");
+        for (String suffix : List.of(".jar", "-tests.jar", "-sources.jar", ".pom")) {
+            assertTrue(Files.isRegularFile(installed.resolve("lib-core-1.0.0-SNAPSHOT" + suffix)),
+                    "installed lib-core" + suffix + "\n" + result.log());
+        }
+    }
+
     @Test
     void graphDescribesEveryExecutionWithoutRunningAny() throws Exception {
         Path cache = MavenBuild.cacheDir("graph");

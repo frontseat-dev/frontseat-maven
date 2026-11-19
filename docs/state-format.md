@@ -31,7 +31,8 @@ change property argLine -javaagent%3A%40%40M2REPO%40%40%2F...%3Ddestfile%3D%40%4
 | `change property <name> <value>` | Set a project property. |
 | `change propertyRemoved <name> <_>` | Removed a project property. |
 | `change artifactFile <_> <path>` | Set the main artifact file. |
-| `incomplete <reason>` | The execution made changes this format can't express (removed source roots, changed resources, attached artifacts). Don't replay it; treat the execution as not restorable. |
+| `change attachedArtifact <type>:<classifier> <path>` | Attached an artifact (e.g. `test-jar:tests`, `java-source:sources`). |
+| `incomplete <reason>` | The execution made changes this format can't express (removed source roots, changed resources, replaced attachments). Don't replay it; treat the execution as not restorable. |
 
 Paths in values use the tokens `@@BASEDIR@@` (the module), `@@ROOT@@` (the multi-module root) and
 `@@M2REPO@@` (the local repository), so a state file stays valid in another checkout or on another

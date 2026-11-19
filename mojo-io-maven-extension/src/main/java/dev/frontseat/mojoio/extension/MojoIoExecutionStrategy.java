@@ -62,12 +62,15 @@ public class MojoIoExecutionStrategy implements MojosExecutionStrategy {
     private final DependencyResolution dependencyResolution;
     private final PrerequisiteExpander prerequisites;
     private final TaskGraphCollector graph;
+    private final org.apache.maven.project.MavenProjectHelper projectHelper;
     /** Projects whose recorded state was already replayed in this JVM's session(s). */
     private final Set<MavenProject> replayed = Collections.newSetFromMap(new WeakHashMap<>());
 
     @Inject
     public MojoIoExecutionStrategy(DescriptorRegistry registry, DependencyResolution dependencyResolution,
-                                   PrerequisiteExpander prerequisites, TaskGraphCollector graph) {
+                                   PrerequisiteExpander prerequisites, TaskGraphCollector graph,
+                                   org.apache.maven.project.MavenProjectHelper projectHelper) {
+        this.projectHelper = projectHelper;
         this.registry = registry;
         this.dependencyResolution = dependencyResolution;
         this.prerequisites = prerequisites;
@@ -94,7 +97,7 @@ public class MojoIoExecutionStrategy implements MojosExecutionStrategy {
                 : executions;
         PathNormalizer normalizer = normalizer(session, project).withStamps(StampValues.of(session, project));
         if (config.state() && replayed.add(project)) {
-            StateFiles.replayPending(project, plan, normalizer);
+            StateFiles.replayPending(project, plan, normalizer, projectHelper);
         }
         LocalCache cache = config.cache() ? new LocalCache(config.cacheDir()) : null;
         for (MojoExecution m : plan) {
@@ -244,7 +247,7 @@ public class MojoIoExecutionStrategy implements MojosExecutionStrategy {
         }
         try {
             cache.restoreFiles(entry, ctx.basedir(), normalizer.stamps());
-            ProjectState.apply(entry.state(), ctx.project(), normalizer);
+            ProjectState.apply(entry.state(), ctx.project(), normalizer, projectHelper);
         } catch (RuntimeException e) {
             LOG.warn(PREFIX + "restore of {} failed, running instead: {}", label, e.toString());
             return false;

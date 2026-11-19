@@ -67,7 +67,7 @@ declarations only need to cover what that hash can't see:
 | `files` | `parameter` or `expression` | Content of the files/trees a path or path-list parameter names, or that a Maven expression such as `${project.file}` evaluates to. |
 | `classpath` | `parameter`, `excludeParameter?` | An ordered classpath, by content not location. `excludeParameter` skips an entry, usually the mojo's own output directory. |
 | `testClasspath` | – | The project's resolved test classpath. For mojos that build it internally. |
-| `resources` | `parameter` | A `List<Resource>`: settings plus selected files. With filtering, also project coordinates, project properties and user properties. |
+| `resources` | `parameter` or `expression` | A `List<Resource>`: settings plus selected files. With filtering, also project coordinates, project properties and user properties. |
 | `projectProperty` | `nameParameter?`, `defaultName` | The current value of a project property the mojo reads and rewrites. |
 
 ### Output kinds

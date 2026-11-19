@@ -76,6 +76,13 @@ public final class ExecutionContext {
      * expression. A node with children evaluates to a list of its children's values.
      */
     public Object parameter(String name) throws NotCacheableException {
+        if (execution.getMojoDescriptor() != null && execution.getMojoDescriptor().getParameterMap() != null
+                && !execution.getMojoDescriptor().getParameterMap().containsKey(name)) {
+            // A declaration written for another version of the plugin: refuse rather than hash nothing.
+            throw new NotCacheableException("the declaration references parameter '" + name + "', which "
+                    + execution.getArtifactId() + ":" + execution.getVersion() + ":" + execution.getGoal()
+                    + " does not have");
+        }
         Xpp3Dom node = parameterNode(name);
         return node == null ? null : evaluate(node);
     }
@@ -116,8 +123,13 @@ public final class ExecutionContext {
 
     /** A parameter that names files or directories, flattened to absolute paths. */
     public List<Path> parameterPaths(String name) throws NotCacheableException {
+        return paths(parameter(name));
+    }
+
+    /** A path, or a collection/array of paths (strings, files), flattened to absolute paths. */
+    public List<Path> paths(Object value) throws NotCacheableException {
         List<Path> paths = new ArrayList<>();
-        collectPaths(parameter(name), paths);
+        collectPaths(value, paths);
         return paths;
     }
 
