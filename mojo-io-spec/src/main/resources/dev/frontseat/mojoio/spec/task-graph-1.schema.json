@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:mojo-io:task-graph:1",
+  "title": "mojo-io task graph, version 1",
+  "description": "Every Maven mojo execution of a build as a task: what it reads, what it writes, where its project-state record lives, and how projects depend on each other. Tool-agnostic. Paths use {projectRoot}, {workspaceRoot} and {localRepository} placeholders.",
+  "type": "object",
+  "required": ["format", "version", "workspaceRoot", "maven", "projects"],
+  "properties": {
+    "format": { "const": "mojo-io-task-graph" },
+    "version": { "const": 1 },
+    "workspaceRoot": { "type": "string", "description": "Absolute path that {workspaceRoot} stood for when the graph was written." },
+    "maven": { "type": "string", "description": "Maven version that computed the graph." },
+    "goals": { "type": "array", "items": { "type": "string" }, "description": "Goals/phases the graph was computed for." },
+    "projects": { "type": "array", "items": { "$ref": "#/$defs/project" } }
+  },
+  "$defs": {
+    "project": {
+      "type": "object",
+      "required": ["id", "path", "packaging", "dependsOn", "poms", "executions"],
+      "properties": {
+        "id": { "type": "string", "description": "groupId:artifactId" },
+        "version": { "type": "string" },
+        "path": { "type": "string", "description": "Project directory relative to the workspace root; \"\" for the root." },
+        "packaging": { "type": "string" },
+        "dependsOn": { "type": "array", "items": { "type": "string" }, "description": "ids of reactor projects this one depends on directly (dependencies, parent, plugins)." },
+        "poms": { "type": "array", "items": { "type": "string" }, "description": "This project's pom and its ancestors inside the workspace." },
+        "executions": { "type": "array", "items": { "$ref": "#/$defs/execution" }, "description": "In execution order." }
+      }
+    },
+    "execution": {
+      "type": "object",
+      "required": ["id", "plugin", "goal", "executionId", "cacheable", "inputs", "outputs", "stateFile"],
+      "properties": {
+        "id": { "type": "string", "description": "groupId:artifactId:version:goal@executionId" },
+        "plugin": { "type": "string", "description": "groupId:artifactId" },
+        "version": { "type": "string" },
+        "goal": { "type": "string" },
+        "executionId": { "type": "string" },
+        "phase": { "type": ["string", "null"], "description": "Lifecycle phase, null for goals invoked directly." },
+        "declaredBy": { "type": ["string", "null"], "description": "Source of the plugin-io declaration (project file, plugin jar, built-in), null if undeclared." },
+        "cacheable": { "type": "boolean" },
+        "reason": { "type": ["string", "null"], "description": "Why the execution is not cacheable." },
+        "inputs": { "type": "array", "items": { "$ref": "#/$defs/input" } },
+        "outputs": { "type": "array", "items": { "$ref": "#/$defs/output" } },
+        "stateFile": { "type": "string", "description": "Where the execution's project-state record is written (mojo-io-state format). Restore it with the outputs." }
+      }
+    },
+    "input": {
+      "type": "object",
+      "required": ["name", "kind"],
+      "properties": {
+        "name": { "type": "string" },
+        "kind": { "enum": ["files", "classpath", "value"] },
+        "paths": { "type": "array", "items": { "type": "string" }, "description": "files: files or directories; under a directory only includes/excludes are selected." },
+        "includes": { "type": "array", "items": { "type": "string" }, "description": "Ant patterns; empty means everything." },
+        "excludes": { "type": "array", "items": { "type": "string" } },
+        "scope": { "type": ["string", "null"], "description": "classpath: Maven resolution scope (compile, test, runtime, ...). The classpath consists of the outputs of the dependsOn projects plus external dependencies of that scope." },
+        "value": { "type": ["string", "null"], "description": "value: the value as known when the graph was computed." }
+      }
+    },
+    "output": {
+      "type": "object",
+      "required": ["name", "path"],
+      "properties": {
+        "name": { "type": "string" },
+        "path": { "type": "string", "description": "A file, or a directory narrowed by includes/excludes." },
+        "includes": { "type": "array", "items": { "type": "string" } },
+        "excludes": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  }
+}

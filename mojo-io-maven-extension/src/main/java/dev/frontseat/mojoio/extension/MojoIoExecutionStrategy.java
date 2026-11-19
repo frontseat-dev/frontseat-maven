@@ -5,12 +5,16 @@ import dev.frontseat.mojoio.cache.CacheKey;
 import dev.frontseat.mojoio.cache.LocalCache;
 import dev.frontseat.mojoio.extension.descriptor.DescriptorRegistry;
 import dev.frontseat.mojoio.extension.descriptor.MojoCacheDescriptor;
+import dev.frontseat.mojoio.cache.FileTrees;
 import dev.frontseat.mojoio.extension.descriptor.OutputSpec;
+import dev.frontseat.mojoio.extension.descriptor.ResolvedOutput;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Collections;
 import java.util.LinkedHashSet;
+import java.util.WeakHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -54,13 +58,17 @@ public class MojoIoExecutionStrategy implements MojosExecutionStrategy {
     private final DescriptorRegistry registry;
     private final DependencyResolution dependencyResolution;
     private final PrerequisiteExpander prerequisites;
+    private final TaskGraphCollector graph;
+    /** Projects whose recorded state was already replayed in this JVM's session(s). */
+    private final Set<MavenProject> replayed = Collections.newSetFromMap(new WeakHashMap<>());
 
     @Inject
     public MojoIoExecutionStrategy(DescriptorRegistry registry, DependencyResolution dependencyResolution,
-                                           PrerequisiteExpander prerequisites) {
+                                   PrerequisiteExpander prerequisites, TaskGraphCollector graph) {
         this.registry = registry;
         this.dependencyResolution = dependencyResolution;
         this.prerequisites = prerequisites;
+        this.graph = graph;
     }
 
     @Override
@@ -74,69 +82,115 @@ public class MojoIoExecutionStrategy implements MojosExecutionStrategy {
             return;
         }
         MavenProject project = session.getCurrentProject();
+        if (config.graphOutput() != null) {
+            graph.add(session, project, executions); // dry run: describe, run nothing
+            return;
+        }
         List<MojoExecution> plan = config.prerequisites()
                 ? prerequisites.expand(executions, session, project)
                 : executions;
-        LocalCache cache = new LocalCache(config.cacheDir());
+        PathNormalizer normalizer = normalizer(session, project);
+        if (config.state() && replayed.add(project)) {
+            StateFiles.replayPending(project, plan, normalizer);
+        }
+        LocalCache cache = config.cache() ? new LocalCache(config.cacheDir()) : null;
         for (MojoExecution m : plan) {
-            executeOne(m, session, project, runner, cache, config);
+            executeOne(m, session, project, runner, cache, config, normalizer);
         }
     }
 
+    /**
+     * One execution: restore it from the cache if possible, otherwise run it; then record what it
+     * changed in the project (for every execution, declared or not).
+     */
     private void executeOne(MojoExecution m, MavenSession session, MavenProject project, MojoExecutionRunner runner,
-                            LocalCache cache, MojoIoConfig config) throws LifecycleExecutionException {
+                            LocalCache cache, MojoIoConfig config, PathNormalizer normalizer)
+            throws LifecycleExecutionException {
         String label = label(m, project);
-        Optional<MojoCacheDescriptor> found = registry.find(m, session);
-        if (found.isEmpty()) {
-            LOG.debug(PREFIX + "no descriptor for {}, running", label);
-            runner.run(m);
-            return;
-        }
-        MojoCacheDescriptor descriptor = found.get();
-        String reason = structuralReason(m, descriptor);
-        if (reason != null) {
-            LOG.info(PREFIX + "SKIP  {}: {}", label, reason);
-            runner.run(m);
-            return;
-        }
-
-        PathNormalizer normalizer = normalizer(session, project);
         ExecutionContext ctx = new ExecutionContext(session, project, m, normalizer);
-        CacheKey key;
-        try {
-            dependencyResolution.resolveFor(m, project, session);
-            key = CacheKeyCalculator.compute(ctx, descriptor);
-        } catch (NotCacheableException e) {
-            LOG.info(PREFIX + "SKIP  {}: {}", label, e.getMessage());
-            runner.run(m);
-            return;
-        } catch (RuntimeException e) {
-            LOG.warn(PREFIX + "SKIP  {}: cannot compute cache key ({})", label, e.toString());
-            LOG.debug(PREFIX + "key failure", e);
-            runner.run(m);
-            return;
-        }
-        String hash = key.hash();
-        writeKeyManifest(project, m, key, descriptor);
+        Optional<MojoCacheDescriptor> descriptor = registry.find(m, session);
 
-        if (config.read()) {
-            Optional<CacheEntry> entry = cache.lookup(hash);
-            if (entry.isPresent() && restore(entry.get(), ctx, cache, label, hash)) {
-                return;
+        CacheKey key = null;
+        if (cache != null) {
+            key = cacheKey(m, session, project, ctx, descriptor, label);
+            if (key != null && config.read()) {
+                Optional<CacheEntry> entry = cache.lookup(key.hash());
+                if (entry.isPresent() && restore(entry.get(), ctx, cache, label, key.hash())) {
+                    if (config.state()) {
+                        StateFiles.record(project, m, entry.get().state(), null);
+                    }
+                    return;
+                }
             }
         }
 
         ProjectState before = ProjectState.capture(project);
         runner.run(m);
+        List<CacheEntry.StateRecord> state = null;
+        String incomplete = null;
+        try {
+            state = before.diff(ProjectState.capture(project), normalizer);
+        } catch (NotCacheableException e) {
+            incomplete = e.getMessage();
+        }
+        if (config.state()) {
+            StateFiles.record(project, m, state == null ? List.of() : state, incomplete);
+        }
+        if (key != null) {
+            store(m, ctx, cache, config, descriptor.get(), key, state, incomplete, label);
+        }
+    }
+
+    /** The cache key, or {@code null} (with a log line) when the execution cannot be cached. */
+    private CacheKey cacheKey(MojoExecution m, MavenSession session, MavenProject project, ExecutionContext ctx,
+                              Optional<MojoCacheDescriptor> descriptor, String label) {
+        if (descriptor.isEmpty()) {
+            LOG.debug(PREFIX + "no declaration for {}, running", label);
+            return null;
+        }
+        String reason = structuralReason(m, descriptor.get());
+        if (reason != null) {
+            LOG.info(PREFIX + "SKIP  {}: {}", label, reason);
+            return null;
+        }
+        try {
+            dependencyResolution.resolveFor(m, project, session);
+            CacheKey key = CacheKeyCalculator.compute(ctx, descriptor.get());
+            writeKeyManifest(project, m, key, descriptor.get());
+            return key;
+        } catch (NotCacheableException e) {
+            LOG.info(PREFIX + "SKIP  {}: {}", label, e.getMessage());
+        } catch (LifecycleExecutionException | RuntimeException e) {
+            LOG.warn(PREFIX + "SKIP  {}: cannot compute cache key ({})", label, e.toString());
+            LOG.debug(PREFIX + "key failure", e);
+        }
+        return null;
+    }
+
+    private void store(MojoExecution m, ExecutionContext ctx, LocalCache cache, MojoIoConfig config,
+                       MojoCacheDescriptor descriptor, CacheKey key, List<CacheEntry.StateRecord> state,
+                       String incomplete, String label) {
+        String hash = key.hash();
         if (!config.write()) {
             LOG.info(PREFIX + "MISS  {} [{}] (cache writes disabled)", label, shortHash(hash));
             return;
         }
+        if (incomplete != null) {
+            LOG.info(PREFIX + "MISS  {} [{}] not stored: {}", label, shortHash(hash), incomplete);
+            return;
+        }
         try {
-            List<CacheEntry.StateRecord> state = before.diff(ProjectState.capture(project), normalizer);
             Map<String, Path> outputs = new TreeMap<>();
-            for (OutputSpec output : descriptor.outputs()) {
-                output.collect(ctx, outputs);
+            for (OutputSpec spec : descriptor.outputs()) {
+                for (ResolvedOutput output : spec.resolve(ctx)) {
+                    for (Path file : output.existingFiles()) {
+                        Path abs = file.toAbsolutePath().normalize();
+                        if (!abs.startsWith(ctx.basedir())) {
+                            throw new NotCacheableException("output " + abs + " is outside the project directory");
+                        }
+                        outputs.put(FileTrees.relative(ctx.basedir(), abs), abs);
+                    }
+                }
             }
             cache.store(hash, CacheKeyCalculator.mojoId(m), outputs, state, key.manifest());
             LOG.info(PREFIX + "MISS  {} [{}] stored {} file(s), {} state change(s)", label, shortHash(hash),
@@ -185,7 +239,7 @@ public class MojoIoExecutionStrategy implements MojosExecutionStrategy {
         return null;
     }
 
-    private static PathNormalizer normalizer(MavenSession session, MavenProject project) {
+    static PathNormalizer normalizer(MavenSession session, MavenProject project) {
         Path root = session.getRequest().getMultiModuleProjectDirectory() != null
                 ? session.getRequest().getMultiModuleProjectDirectory().toPath()
                 : session.getTopLevelProject().getBasedir().toPath();

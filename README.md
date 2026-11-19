@@ -11,11 +11,24 @@ them. Tool integrations live outside it, as adapters.
 
 | Layer | What | Knows about tools? |
 |---|---|---|
-| **Specs** (`mojo-io-spec`) | Versioned, documented formats: [`plugin-io.xml`](docs/plugin-io.md) declares mojo I/O. A task-graph format and a project-state format are next. JDK-only, no Maven dependency. | No |
-| **Maven extension** (`mojo-io-maven-extension`) | An ordinary core extension (`.mvn/extensions.xml`) for Maven 3.9 and 4. It resolves each execution's inputs and outputs, captures and replays project state, and includes an optional local cache. | No |
+| **Specs** (`mojo-io-spec`) | Versioned, documented formats, JDK-only with no Maven dependency: [`plugin-io.xml`](docs/plugin-io.md) declares mojo I/O, the [task graph](docs/task-graph.md) describes a build as tasks (JSON Schema), and the [project-state file](docs/state-format.md) records what each execution changed in the in-memory project. | No |
+| **Maven extension** (`mojo-io-maven-extension`) | An ordinary core extension (`.mvn/extensions.xml`) for Maven 3.9 and 4. Three independent features: **graph export** (a dry run), **state record/replay** (so a restored `target/` is enough to continue a build), and an optional **local cache**. | No |
 | **Adapters** (outside this repo's core) | Nx, Frontseat, Bazel, CI caches, … Each translates the neutral formats for one tool. | Yes, one tool each |
 
 You don't need a Maven fork or a core patch, and you don't have to change your POMs.
+
+## For tool authors
+
+To integrate mojo-io with an orchestrator or cache:
+1. **Read the graph.** Run `mvn verify -Dmojoio.graph.output=graph.json`. This is a dry run that
+   describes every mojo execution without running any. The graph gives each execution's inputs,
+   outputs, project dependencies and cacheability ([format](docs/task-graph.md)).
+2. **Schedule and cache.** Cache each task's `outputs` **and its `stateFile`**.
+3. **Restore and continue.** Restore those files and run plain `mvn` with the extension loaded. It
+   replays the recorded project state (artifact files, generated source roots, properties like
+   JaCoCo's `argLine`) for executions that don't run, relocated to the current checkout. Pass
+   `-Dmojoio.prerequisites=false -Dmojoio.cache.enabled=false` if your tool does the scheduling and
+   caching itself.
 
 ## The built-in cache (one consumer)
 
@@ -57,7 +70,7 @@ storing an entry, the mojo just runs.
 
 | Plugin | Goal | Status | IT-verified version | Parameters checked in | Restores | Notes |
 |---|---|---|---|---|---|---|
-| `maven-resources-plugin` | `resources`, `testResources` | ✅ | 3.3.1 | 3.1.0, 3.2.0, 3.3.0, 3.3.1, 4.0.0-beta-1 | copied files | Filtering hashes project + `-D` properties, not system properties or env. `${maven.build.timestamp}` in a filtered file means it misses every time. |
+| `maven-resources-plugin` | `resources`, `testResources` | ✅ | 3.3.1 | 3.1.0, 3.2.0, 3.3.0, 3.3.1, 4.0.0-beta-1 | copied files | Filtering hashes exactly the `${…}`/`@…@` expressions the files reference, evaluated as Maven would. `${maven.build.timestamp}` in a filtered file means it misses every time. |
 | `maven-compiler-plugin` | `compile`, `testCompile` | ✅ | 3.13.0 | 3.8.1, 3.10.1, 3.11.0, 3.12.1, 3.13.0, 3.14.0, 4.0.0-beta-2 | classes, generated sources, source root, artifact file | Configuring `annotationProcessorPaths` makes it uncacheable (unsupported parameter type). Toolchains are not in the key. |
 | `maven-surefire-plugin` | `test` | ✅ | 3.5.2 | 2.22.2, 3.0.0, 3.2.5, 3.5.2, 3.5.4 | reports, JaCoCo `destfile` | Tests that use the network, a DB, env vars or files outside the project get cached too: override with `.mvn/plugin-io/`. With `testFailureIgnore`, failures are cached. |
 | `jacoco-maven-plugin` | `prepare-agent` | ✅ | 0.8.12 | 0.8.7, 0.8.10, 0.8.12, 0.8.13, 0.8.14 | `argLine` | A hit requires the agent jar in the local repository; otherwise it counts as a miss. |
@@ -132,7 +145,10 @@ live service, drop a file in `.mvn/plugin-io/`:
 
 | Property | Default | |
 |---|---|---|
-| `mojoio.cache.enabled` | `true` | Master switch. |
+| `mojoio.enabled` | `true` | Master switch. |
+| `mojoio.state.enabled` | `true` | Record project-state files in `target/mojo-io/state/` and replay them for executions that don't run. |
+| `mojoio.graph.output` | unset | Write the task graph to this file instead of running mojos (dry run). |
+| `mojoio.cache.enabled` | `true` | The built-in local cache. |
 | `mojoio.cache.dir` | `~/.m2/mojo-io-cache` | Local cache location. |
 | `mojoio.cache.read` / `mojoio.cache.write` | `true` | E.g. `write=false` for a read-only CI consumer. |
 | `mojoio.prerequisites` | `true` | Expand directly-invoked goals with their lifecycle prerequisites. |
@@ -152,7 +168,7 @@ Every cacheable execution writes its key's inputs, and which declaration was use
 | `mojo-io-maven-extension` | The core extension: execution strategy, declaration lookup, project-state diff, prerequisites. |
 | `mojo-io-it` | Integration tests that fork real Maven 3.9 / 4 builds of the projects in `src/it/projects`. |
 | `mise.toml`, `mise-tasks/` | Toolchain and tasks. |
-| `docs/` | [Design notes](docs/design.md), [plugin-io format](docs/plugin-io.md), [Maven 4 proposal](docs/maven4-proposal.md). |
+| `docs/` | [Design notes](docs/design.md), formats ([plugin-io](docs/plugin-io.md), [task graph](docs/task-graph.md), [state](docs/state-format.md)), [Maven 4 proposal](docs/maven4-proposal.md). |
 
 ## Development
 
