@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        java: ['17', '21']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.java }}
+          cache: maven
+      - name: Build, unit tests and integration tests
+        run: ./mvnw -B -ntp verify
+      - name: Upload IT logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: it-logs-java-${{ matrix.java }}
+          path: |
+            frontseat-it/target/it/**/build-*.log
+            frontseat-it/target/failsafe-reports/
