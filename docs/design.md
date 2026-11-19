@@ -62,8 +62,9 @@ boundaries. As a result:
 ### Project state
 
 `ProjectState` captures compile and test source roots, resources, properties, the artifact file and
-attached artifacts. Replayable diffs are: added source roots, property set/remove, and the artifact
-file. Removed source roots, changed resources and attached artifacts make the execution non-cacheable
+attached artifacts. Replayable diffs are: added source roots, property set/remove, the artifact
+file, and newly attached artifacts. Removed source roots, changed resources and replaced attachments
+make the execution non-cacheable
 instead of being dropped.
 
 **Main risk:** a mojo can change things the diff can't see: static fields, system properties, the

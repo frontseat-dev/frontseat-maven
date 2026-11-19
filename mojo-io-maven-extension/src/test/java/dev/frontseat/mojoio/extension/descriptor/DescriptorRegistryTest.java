@@ -40,8 +40,17 @@ class DescriptorRegistryTest {
                 "org.apache.maven.plugins:maven-compiler-plugin:testCompile",
                 "org.apache.maven.plugins:maven-surefire-plugin:test",
                 "org.jacoco:jacoco-maven-plugin:prepare-agent",
-                "org.apache.maven.plugins:maven-jar-plugin:jar"), builtin.keySet());
-        builtin.values().forEach(d -> assertTrue(d.cacheable(), d.goal() + ": " + d.notCacheableReason()));
+                "org.apache.maven.plugins:maven-jar-plugin:jar",
+                "org.apache.maven.plugins:maven-jar-plugin:test-jar",
+                "org.apache.maven.plugins:maven-source-plugin:jar-no-fork",
+                "org.apache.maven.plugins:maven-failsafe-plugin:integration-test",
+                "org.apache.maven.plugins:maven-failsafe-plugin:verify",
+                "org.jacoco:jacoco-maven-plugin:report",
+                "org.apache.maven.plugins:maven-clean-plugin:clean",
+                "org.apache.maven.plugins:maven-install-plugin:install",
+                "org.apache.maven.plugins:maven-deploy-plugin:deploy"), builtin.keySet());
+        builtin.values().forEach(d -> assertEquals(!Set.of("clean", "install", "deploy").contains(d.goal()),
+                d.cacheable(), d.goal() + ": " + d.notCacheableReason()));
         MojoCacheDescriptor surefire = builtin.get("org.apache.maven.plugins:maven-surefire-plugin:test");
         assertEquals("process-test-classes", surefire.prerequisitePhase());
         assertTrue(surefire.ignoredParameters().contains("forkNode"));

@@ -32,6 +32,12 @@ class FileTreesTest {
         assertEquals(FileTrees.ABSENT, FileTrees.hash(tmp.resolve("nope")));
     }
 
+    @Test
+    void emptyDirectoryHashesLikeAMissingOne(@TempDir Path tmp) throws Exception {
+        Files.createDirectories(tmp.resolve("empty/nested"));
+        assertEquals(FileTrees.hash(tmp.resolve("nope")), FileTrees.hash(tmp.resolve("empty")));
+    }
+
     private static Path write(Path root, String rel, String content) throws Exception {
         Path f = root.resolve(rel);
         Files.createDirectories(f.getParent());

@@ -70,23 +70,26 @@ storing an entry, the mojo just runs.
 
 | Plugin | Goal | Status | IT-verified version | Parameters checked in | Restores | Notes |
 |---|---|---|---|---|---|---|
-| `maven-resources-plugin` | `resources`, `testResources` | ✅ | 3.3.1 | 3.1.0, 3.2.0, 3.3.0, 3.3.1, 4.0.0-beta-1 | copied files | Filtering hashes exactly the `${…}`/`@…@` expressions the files reference, evaluated as Maven would. `${maven.build.timestamp}` in a filtered file means it misses every time. |
-| `maven-compiler-plugin` | `compile`, `testCompile` | ✅ | 3.13.0 | 3.8.1, 3.10.1, 3.11.0, 3.12.1, 3.13.0, 3.14.0, 4.0.0-beta-2 | classes, generated sources, source root, artifact file | Configuring `annotationProcessorPaths` makes it uncacheable (unsupported parameter type). Toolchains are not in the key. |
-| `maven-surefire-plugin` | `test` | ✅ | 3.5.2 | 2.22.2, 3.0.0, 3.2.5, 3.5.2, 3.5.4 | reports, JaCoCo `destfile` | Tests that use the network, a DB, env vars or files outside the project get cached too: override with `.mvn/plugin-io/`. With `testFailureIgnore`, failures are cached. |
+| `maven-resources-plugin` | `resources`, `testResources` | ✅ | 3.3.1 | 3.1.0, 3.2.0, 3.3.0, 3.3.1, 4.0.0-beta-1 | copied files | `carry`. Filtering hashes exactly the `${…}`/`@…@` expressions the files reference. `${maven.build.timestamp}` in a filtered file means it misses every time. |
+| `maven-compiler-plugin` | `compile`, `testCompile` | ✅ | 3.13.0 | 3.8.1 – 3.14.0 | classes, generated sources, source root, artifact file | `carry`. **4.x is not compatible** (no `compilePath`/`testPath`) and runs uncached. Configuring `annotationProcessorPaths` makes it uncacheable. Toolchains are not in the key. |
+| `maven-surefire-plugin` | `test` | ✅ | 3.5.2 | 2.22.2, 3.0.0, 3.2.5, 3.5.2, 3.5.4 | reports, JaCoCo `destfile` | `exact`. Tests that use the network, a DB, env vars or files outside the project get cached too: override with `.mvn/plugin-io/`. With `testFailureIgnore`, failures are cached. |
+| `maven-failsafe-plugin` | `integration-test`, `verify` | ✅ | 3.5.2 | 2.22.2, 3.0.0, 3.2.5, 3.5.2, 3.5.4 | reports, summary | `exact`. Integration tests often reach outside the project; mark them `cacheable="false"` in `.mvn/plugin-io/` if yours do. |
+| `maven-jar-plugin` | `jar`, `test-jar` | ✅ | 3.4.2 | 3.2.2, 3.3.0, 3.4.1, 3.4.2 | the jar, artifact file / attached artifact | `carry`: after a version bump the restored jar is renamed and its `pom.properties`, pom and manifest are restamped. |
+| `maven-source-plugin` | `jar-no-fork` | ✅ | 3.3.1 | 3.2.1, 3.3.0, 3.3.1 | sources jar, attached artifact | `carry`. The forking `jar` goal is not cacheable (forks a lifecycle); use `jar-no-fork`. |
 | `jacoco-maven-plugin` | `prepare-agent` | ✅ | 0.8.12 | 0.8.7, 0.8.10, 0.8.12, 0.8.13, 0.8.14 | `argLine` | A hit requires the agent jar in the local repository; otherwise it counts as a miss. |
-| `jacoco-maven-plugin` | `report` | ➖ | | | | Next candidate: inputs `jacoco.exec` + classes, output `site/jacoco`. |
-| `maven-jar-plugin` | `jar` | ✅ | 3.4.2 | | the jar, artifact file | `carry`: after a version bump the restored jar is renamed and its `pom.properties`, pom and manifest are restamped. `test-jar` is not declared yet (it attaches an artifact). |
-| `maven-failsafe-plugin` | `integration-test`, `verify` | ➖ | | | | Same shape as surefire; usually needs a per-project decision. |
-| `maven-source-plugin` | `jar` | ➖ | | | | Forks a lifecycle: skipped by design today. `jar-no-fork` is the candidate. |
+| `jacoco-maven-plugin` | `report` | ✅ | 0.8.12 | 0.8.7, 0.8.10, 0.8.12, 0.8.13, 0.8.14 | `site/jacoco` | `exact`. Hits whenever the coverage data is unchanged (e.g. tests restored from the cache). |
 | `maven-javadoc-plugin` | `javadoc`, `jar` | ➖ | | | | |
 | `maven-clean-plugin` | `clean` | ⛔ | | | | Deletes outputs; nothing to cache. |
-| `maven-install-plugin` | `install` | ⛔ | | | | Writes to the local repository (outside the project). |
-| `maven-deploy-plugin` | `deploy` | ⛔ | | | | Talks to a remote repository. |
+| `maven-install-plugin` | `install` | ⛔ | | | | Writes to the local repository; works from replayed state (artifact file + attachments). |
+| `maven-deploy-plugin` | `deploy` | ⛔ | | | | Publishes to a remote repository. |
 
-Version support is **not enforced at runtime** yet: a built-in declaration applies to any version of
-its plugin. A plugin's own `META-INF/maven/plugin-io.xml` and a project's `.mvn/plugin-io/` override
-the built-in declarations. To add a row, add the declaration to `builtin-plugin-io.xml`, check its
-parameters against the plugin versions, and add an IT before marking it ✅.
+`mise run registry:check` re-verifies the "Parameters checked in" column: it downloads each version
+listed in `registry/checked-versions.txt` and checks that every parameter a declaration references
+exists on that goal. At runtime, a declaration that references a parameter the mojo doesn't have
+(i.e. another plugin version) makes the execution run uncached, and the log line explains why. A plugin's own `META-INF/maven/plugin-io.xml` and a project's `.mvn/plugin-io/` override
+the built-in declarations. To add a row, add the declaration to `builtin-plugin-io.xml`, list the
+versions in `registry/checked-versions.txt`, run `mise run registry:check`, and add an IT before
+marking it ✅.
 
 **Tip:** set `project.build.outputTimestamp` (reproducible builds) in your projects. mojo-io
 doesn't need it, but it makes the jars themselves identical across builds, which a shared or remote
@@ -112,6 +115,7 @@ mise tasks              # list tasks
 | `mise run demo -- [--maven4] [--fresh] <goals>` | Run the sample project with the extension, e.g. `mise run demo -- --fresh surefire:test`. |
 | `mise run install` | Install to `~/.m2` for use via `.mvn/extensions.xml`. |
 | `mise run cache:clear` | Delete the local cache. |
+| `mise run registry:check` | Verify the built-in declarations against every plugin version in `registry/checked-versions.txt`. |
 
 ## Use it in a project
 

@@ -65,7 +65,8 @@ final class StateFiles {
      * Replays the recorded state of every execution that is not in {@code plan}: those mojos will not
      * run in this build, but later mojos may depend on what they did (e.g. JaCoCo's {@code argLine}).
      */
-    static void replayPending(MavenProject project, Collection<MojoExecution> plan, PathNormalizer normalizer) {
+    static void replayPending(MavenProject project, Collection<MojoExecution> plan, PathNormalizer normalizer,
+                              org.apache.maven.project.MavenProjectHelper helper) {
         Path dir = directory(project);
         if (!Files.isDirectory(dir)) {
             return;
@@ -106,7 +107,7 @@ final class StateFiles {
                 LOG.warn("[mojo-io] cannot replay {}: needs {}", state.execution(), missing);
                 continue;
             }
-            ProjectState.apply(records, project, normalizer);
+            ProjectState.apply(records, project, normalizer, helper);
             if (records.isEmpty()) {
                 continue;
             }

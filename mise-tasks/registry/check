@@ -1,0 +1,92 @@
+#!/usr/bin/env python3
+#MISE description="Check every parameter the built-in plugin-io declarations reference against real plugin.xml files"
+"""For each plugin version in registry/checked-versions.txt, download the plugin jar (via mvn) and
+check that every parameter the built-in declarations reference exists on that goal. Exits non-zero
+on a missing referenced parameter; a missing ignored parameter is only reported (it is harmless)."""
+import os, re, subprocess, sys, zipfile
+import xml.etree.ElementTree as ET
+
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+NS = {"p": "urn:mojo-io:plugin-io:1.0"}
+BUILTIN = os.path.join(ROOT, "mojo-io-maven-extension/src/main/resources/META-INF/mojo-io/builtin-plugin-io.xml")
+REF_ATTRS = ["parameter", "excludeParameter", "resourcesParameter", "outputDirectoryParameter", "nameParameter"]
+
+def local_repo():
+    out = subprocess.run(["mvn", "-q", "-B", "help:evaluate", "-Dexpression=settings.localRepository", "-DforceStdout"],
+                         capture_output=True, text=True, cwd=ROOT).stdout.strip()
+    return out or os.path.expanduser("~/.m2/repository")
+
+def jar_path(repo, g, a, v):
+    return os.path.join(repo, *g.split("."), a, v, f"{a}-{v}.jar")
+
+def declarations():
+    decls = {}
+    for plugin in ET.parse(BUILTIN).getroot().findall("p:plugin", NS):
+        key = plugin.get("groupId") + ":" + plugin.get("artifactId")
+        for mojo in plugin.findall("p:mojo", NS):
+            if mojo.get("cacheable") == "false":
+                continue
+            refs, ignored = set(), set()
+            for el in mojo.iter():
+                for attr in REF_ATTRS:
+                    if el.get(attr):
+                        refs.add(el.get(attr))
+                if el.get("name") and "{" in (el.get("name") or ""):
+                    refs.update(re.findall(r"\{-?([A-Za-z0-9_.]+)}", el.get("name")))
+            ig = mojo.find("p:ignoredParameters", NS)
+            if ig is not None and ig.text:
+                ignored = {p for p in re.split(r"[,\s]+", ig.text) if p}
+            decls.setdefault(key, {})[mojo.get("goal")] = (refs, ignored - refs)
+    return decls
+
+def main():
+    repo = local_repo()
+    decls = declarations()
+    errors, rows = 0, []
+    with open(os.path.join(ROOT, "registry/checked-versions.txt")) as f:
+        lines = [l.split() for l in f if l.strip() and not l.startswith("#")]
+    for key, *versions in lines:
+        expect_failure = key.startswith("!")
+        key = key.lstrip("!")
+        if key not in decls:
+            print(f"ERROR {key}: listed in checked-versions.txt but not declared"); errors += 1; continue
+        g, a = key.split(":")
+        for v in versions:
+            jar = jar_path(repo, g, a, v)
+            if not os.path.exists(jar):
+                subprocess.run(["mvn", "-q", "-B", "dependency:get", f"-Dartifact={g}:{a}:{v}", "-Dtransitive=false"],
+                               capture_output=True, cwd=ROOT)
+            if not os.path.exists(jar):
+                print(f"ERROR {a} {v}: cannot download"); errors += 1; continue
+            plugin = ET.fromstring(zipfile.ZipFile(jar).read("META-INF/maven/plugin.xml"))
+            for el in plugin.iter():  # Maven 4 descriptors are namespaced: match on local names
+                el.tag = el.tag.split("}")[-1]
+            mojos = {m.findtext("goal"): {p.findtext("name") for p in (m.find("parameters") or [])}
+                     for m in plugin.iter("mojo")}
+            problems = []
+            for goal, (refs, ignored) in decls[key].items():
+                if goal not in mojos:
+                    problems.append(f"goal {goal} missing"); continue
+                missing = sorted(refs - mojos[goal])
+                if missing:
+                    problems.append(f"{goal}: missing {missing}")
+                stale = sorted(ignored - mojos[goal])
+                if stale:
+                    print(f"note  {a} {v} {goal}: ignored parameters not present (harmless): {stale}")
+            if expect_failure:
+                if not problems:
+                    print(f"ERROR {a} {v}: listed as incompatible but now passes; move it to the checked list")
+                    errors += 1
+                rows.append((a, v, "incompatible (expected): " + "; ".join(problems)))
+                continue
+            errors += len(problems)
+            rows.append((a, v, "OK" if not problems else "; ".join(problems)))
+    for a, v, status in rows:
+        print(f"{a:26} {v:14} {status}")
+    undeclared = sorted(set(decls) - {l[0].lstrip("!") for l in lines})
+    if undeclared:
+        print(f"ERROR declared but never checked: {undeclared}"); errors += 1
+    sys.exit(1 if errors else 0)
+
+if __name__ == "__main__":
+    main()

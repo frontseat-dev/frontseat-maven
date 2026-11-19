@@ -81,7 +81,12 @@
       </xs:element>
       <!-- A List<Resource> parameter: resource settings plus selected file content; filtering adds
            project coordinates, project properties and user properties. -->
-      <xs:element name="resources" type="ParameterRef"/>
+      <xs:element name="resources">
+        <xs:complexType>
+          <xs:attribute name="parameter" type="xs:string"/>
+          <xs:attribute name="expression" type="xs:string"/>
+        </xs:complexType>
+      </xs:element>
       <!-- Current value of a project property the mojo reads and rewrites. -->
       <xs:element name="projectProperty">
         <xs:complexType>

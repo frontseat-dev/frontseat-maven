@@ -77,6 +77,31 @@
       </outputs>
       <ignoredParameters>classesDirectory, forceCreation</ignoredParameters>
     </mojo>
+    <mojo goal="test-jar" prerequisitePhase="prepare-package" stamping="carry">
+      <inputs>
+        <files parameter="testClassesDirectory"/>
+        <files expression="${project.file}"/>
+      </inputs>
+      <outputs>
+        <file parameter="outputDirectory" name="{finalName}{-classifier}.jar"/>
+      </outputs>
+      <ignoredParameters>testClassesDirectory, forceCreation</ignoredParameters>
+    </mojo>
+  </plugin>
+
+  <plugin groupId="org.apache.maven.plugins" artifactId="maven-source-plugin">
+    <!-- The forking "jar" goal is skipped (it re-runs a lifecycle); jar-no-fork is the cacheable one. -->
+    <mojo goal="jar-no-fork" prerequisitePhase="prepare-package" stamping="carry">
+      <inputs>
+        <files expression="${project.compileSourceRoots}"/>
+        <resources expression="${project.resources}"/>
+        <files expression="${project.file}"/>
+      </inputs>
+      <outputs>
+        <file parameter="outputDirectory" name="{finalName}{-classifier}.jar"/>
+      </outputs>
+      <ignoredParameters>forceCreation, defaultManifestFile</ignoredParameters>
+    </mojo>
   </plugin>
 
   <!-- Tests act on what they read (a test may assert the version), so stamps stay in their key. -->
@@ -105,6 +130,41 @@
     </mojo>
   </plugin>
 
+  <plugin groupId="org.apache.maven.plugins" artifactId="maven-failsafe-plugin">
+    <!-- Integration tests often reach outside the project (servers, containers, databases): if yours
+         do, mark this goal cacheable="false" in .mvn/plugin-io/. -->
+    <mojo goal="integration-test" prerequisitePhase="package">
+      <inputs>
+        <testClasspath/>
+        <files parameter="classesDirectory"/>
+        <files parameter="defaultClassesDirectory"/>
+        <files parameter="testClassesDirectory"/>
+        <files parameter="suiteXmlFiles"/>
+        <files parameter="includesFile"/>
+        <files parameter="excludesFile"/>
+        <files parameter="systemPropertiesFile"/>
+      </inputs>
+      <outputs>
+        <directory parameter="reportsDirectory"/>
+        <javaagentDestFiles parameter="argLine"/>
+      </outputs>
+      <ignoredParameters>
+        classesDirectory, defaultClassesDirectory, testClassesDirectory,
+        consoleOutputReporter, statelessTestsetInfoReporter, statelessTestsetReporter, forkNode,
+        printSummary, trimStackTrace, tempDir, debugForkedProcess, parallelMavenExecution,
+        enableProcessChecker, forkedProcessExitTimeoutInSeconds, shutdown
+      </ignoredParameters>
+    </mojo>
+    <!-- Only reads the summary written by integration-test; fails the build on failures. -->
+    <mojo goal="verify">
+      <inputs>
+        <files parameter="summaryFile"/>
+        <files parameter="summaryFiles"/>
+      </inputs>
+      <ignoredParameters>summaryFile, summaryFiles, reportsDirectory, testClassesDirectory</ignoredParameters>
+    </mojo>
+  </plugin>
+
   <plugin groupId="org.jacoco" artifactId="jacoco-maven-plugin">
     <mojo goal="prepare-agent">
       <inputs>
@@ -112,5 +172,27 @@
         <projectProperty nameParameter="propertyName" defaultName="argLine"/>
       </inputs>
     </mojo>
+    <mojo goal="report">
+      <inputs>
+        <files parameter="dataFile"/>
+        <files expression="${project.build.outputDirectory}"/>
+        <files expression="${project.compileSourceRoots}"/>
+      </inputs>
+      <outputs>
+        <directory parameter="outputDirectory"/>
+      </outputs>
+      <ignoredParameters>dataFile</ignoredParameters>
+    </mojo>
+  </plugin>
+
+  <!-- Effects outside the project: always run. -->
+  <plugin groupId="org.apache.maven.plugins" artifactId="maven-clean-plugin">
+    <mojo goal="clean" cacheable="false" reason="deletes outputs; nothing to cache"/>
+  </plugin>
+  <plugin groupId="org.apache.maven.plugins" artifactId="maven-install-plugin">
+    <mojo goal="install" cacheable="false" reason="writes to the local repository"/>
+  </plugin>
+  <plugin groupId="org.apache.maven.plugins" artifactId="maven-deploy-plugin">
+    <mojo goal="deploy" cacheable="false" reason="publishes to a remote repository"/>
   </plugin>
 </plugin-io>

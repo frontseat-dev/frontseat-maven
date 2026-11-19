@@ -11,13 +11,14 @@ import java.util.TreeMap;
 import org.apache.maven.artifact.Artifact;
 import org.apache.maven.model.Resource;
 import org.apache.maven.project.MavenProject;
+import org.apache.maven.project.MavenProjectHelper;
 
 /**
  * The parts of {@link MavenProject} that mojos commonly mutate and that later mojos read. A snapshot
  * is taken before a cache-miss execution and diffed afterwards; the diff is stored with the outputs
  * and replayed on a hit.
  *
- * <p>Changes this class cannot replay (removed source roots, changed resources, attached artifacts)
+ * <p>Changes this class cannot replay (removed source roots, changed resources, replaced attachments)
  * make the execution non-cacheable rather than being silently dropped. Changes it cannot see at all
  * (static fields, system properties, the session) are why descriptors exist: mojos known to make
  * them are marked non-cacheable.
@@ -29,6 +30,7 @@ final class ProjectState {
     static final String PROPERTY = "property";
     static final String PROPERTY_REMOVED = "propertyRemoved";
     static final String ARTIFACT_FILE = "artifactFile";
+    static final String ATTACHED_ARTIFACT = "attachedArtifact";
 
     private final List<String> compileSourceRoots;
     private final List<String> testCompileSourceRoots;
@@ -36,7 +38,8 @@ final class ProjectState {
     private final List<String> testResources;
     private final Map<String, String> properties;
     private final String artifactFile;
-    private final List<String> attachedArtifacts;
+    /** type:classifier -> file, in attachment order. */
+    private final Map<String, String> attachedArtifacts;
 
     private ProjectState(MavenProject project) {
         compileSourceRoots = new ArrayList<>(project.getCompileSourceRoots());
@@ -47,9 +50,10 @@ final class ProjectState {
         project.getProperties().forEach((k, v) -> properties.put(String.valueOf(k), String.valueOf(v)));
         File file = project.getArtifact() == null ? null : project.getArtifact().getFile();
         artifactFile = file == null ? null : file.getAbsolutePath();
-        attachedArtifacts = new ArrayList<>();
+        attachedArtifacts = new LinkedHashMap<>();
         for (Artifact a : project.getAttachedArtifacts()) {
-            attachedArtifacts.add(a.getId() + "@" + a.getFile());
+            attachedArtifacts.put(attachmentId(a.getType(), a.getClassifier()),
+                    a.getFile() == null ? null : a.getFile().getAbsolutePath());
         }
     }
 
@@ -65,8 +69,10 @@ final class ProjectState {
         if (!resources.equals(after.resources) || !testResources.equals(after.testResources)) {
             throw new NotCacheableException("execution changed project resources");
         }
-        if (!attachedArtifacts.equals(after.attachedArtifacts)) {
-            throw new NotCacheableException("execution attached artifacts");
+        for (Map.Entry<String, String> e : attachedArtifacts.entrySet()) {
+            if (!Objects.equals(e.getValue(), after.attachedArtifacts.get(e.getKey()))) {
+                throw new NotCacheableException("execution removed or replaced attached artifact " + e.getKey());
+            }
         }
         Map<String, String> changed = new LinkedHashMap<>();
         after.properties.forEach((k, v) -> {
@@ -82,6 +88,11 @@ final class ProjectState {
         }
         if (!Objects.equals(artifactFile, after.artifactFile)) {
             records.add(new StateRecord(ARTIFACT_FILE, "", n.normalize(after.artifactFile)));
+        }
+        for (Map.Entry<String, String> e : after.attachedArtifacts.entrySet()) {
+            if (!attachedArtifacts.containsKey(e.getKey())) {
+                records.add(new StateRecord(ATTACHED_ARTIFACT, e.getKey(), n.normalize(e.getValue())));
+            }
         }
         return records;
     }
@@ -99,7 +110,7 @@ final class ProjectState {
     }
 
     /** Replays normalized records onto {@code project}. */
-    static void apply(List<StateRecord> records, MavenProject project, PathNormalizer n) {
+    static void apply(List<StateRecord> records, MavenProject project, PathNormalizer n, MavenProjectHelper helper) {
         for (StateRecord r : records) {
             String value = n.denormalize(r.value());
             switch (r.kind()) {
@@ -108,9 +119,26 @@ final class ProjectState {
                 case PROPERTY -> project.getProperties().setProperty(r.name(), value);
                 case PROPERTY_REMOVED -> project.getProperties().remove(r.name());
                 case ARTIFACT_FILE -> project.getArtifact().setFile(value == null ? null : new File(value));
+                case ATTACHED_ARTIFACT -> attach(project, r.name(), value, helper);
                 default -> throw new IllegalStateException("Unknown state record kind " + r.kind());
             }
         }
+    }
+
+    static String attachmentId(String type, String classifier) {
+        return type + ":" + (classifier == null ? "" : classifier);
+    }
+
+    private static void attach(MavenProject project, String id, String file, MavenProjectHelper helper) {
+        String[] tc = id.split(":", 2);
+        String classifier = tc.length > 1 && !tc[1].isEmpty() ? tc[1] : null;
+        for (Artifact a : project.getAttachedArtifacts()) {
+            if (attachmentId(a.getType(), a.getClassifier()).equals(id)) {
+                a.setFile(new File(file)); // already attached (e.g. replayed twice): just point at the file
+                return;
+            }
+        }
+        helper.attachArtifact(project, tc[0], classifier, new File(file));
     }
 
     private static List<String> describe(List<Resource> resources) {

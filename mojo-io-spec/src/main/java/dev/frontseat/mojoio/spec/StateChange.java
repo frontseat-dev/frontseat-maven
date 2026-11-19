@@ -7,7 +7,8 @@ package dev.frontseat.mojoio.spec;
  *   <li>{@code compileSourceRoot} / {@code testCompileSourceRoot}: value = added root;</li>
  *   <li>{@code property}: name = property, value = new value;</li>
  *   <li>{@code propertyRemoved}: name = property;</li>
- *   <li>{@code artifactFile}: value = the project's main artifact file.</li>
+ *   <li>{@code artifactFile}: value = the project's main artifact file;</li>
+ *   <li>{@code attachedArtifact}: name = {@code type:classifier}, value = the attached file.</li>
  * </ul>
  *
  * Paths inside values use the tokens {@code @@BASEDIR@@} (the module), {@code @@ROOT@@} (the

@@ -30,12 +30,20 @@ class VersioningIT {
         MavenBuild.Result result = v2.run("verify");
 
         for (String module : List.of("lib-core", "app")) {
-            for (String goal : List.of("resources:resources", "compiler:compile", "compiler:testCompile", "jar:jar")) {
+            for (String goal : List.of("resources:resources", "compiler:compile", "compiler:testCompile", "jar:jar",
+                    "source:jar-no-fork")) {
                 assertEquals("HIT", result.outcome(module, goal), module + " " + goal + "\n" + result.log());
             }
             // Tests may act on the version (GreeterTest compares it): they run again, and pass,
             // which also proves the restamped filtered resource carries the new version.
             assertEquals("MISS", result.outcome(module, "surefire:test"), result.log());
+        }
+        assertEquals("HIT", result.outcome("lib-core", "jar:test-jar"), result.log());
+        assertTrue(Files.isRegularFile(v2.dir().resolve("lib-core/target/lib-core-1.1.0-SNAPSHOT-tests.jar")));
+        Path sources = v2.dir().resolve("lib-core/target/lib-core-1.1.0-SNAPSHOT-sources.jar");
+        try (ZipFile zip = new ZipFile(sources.toFile())) {
+            assertTrue(entry(zip, "greeting.properties").contains("version=${project.version}"),
+                    "sources carry the unfiltered template, which must stay as it is");
         }
         Path jar = v2.dir().resolve("lib-core/target/lib-core-1.1.0-SNAPSHOT.jar");
         assertTrue(Files.isRegularFile(jar), "restored jar must carry the new version in its name");
