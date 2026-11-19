@@ -118,4 +118,21 @@ class BasicMultimoduleIT {
         assertTrue(again.log().contains("integration tests hit a live service"), again.log());
         assertTrue(again.log().contains("T E S T S"), "tests must run every time");
     }
+
+    /**
+     * Regression: after package, downstream modules compile against the upstream jar. The jar is
+     * re-packed on every build (new entry timestamps), which must not change downstream keys.
+     */
+    @Test
+    void repeatedVerifyIsAllHitsDespiteRepackedJars() throws Exception {
+        Path cache = MavenBuild.cacheDir("verify-twice");
+        MavenBuild build = MavenBuild.checkout(PROJECT, "verify-twice", "checkout", cache);
+        build.run("verify");
+        MavenBuild.Result again = build.run("verify");
+        assertEquals(0, again.count("MISS"), again.log());
+        for (String module : MODULES) {
+            assertEquals("HIT", again.outcome(module, "compiler:compile"), again.log());
+            assertEquals("HIT", again.outcome(module, "surefire:test"), again.log());
+        }
+    }
 }

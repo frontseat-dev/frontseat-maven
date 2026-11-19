@@ -1,6 +1,13 @@
 package dev.frontseat.maven.cache;
 
 import java.io.IOException;
+import java.io.InputStream;
+import java.security.MessageDigest;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HexFormat;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipFile;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -33,6 +40,46 @@ public final class FileTrees {
             manifest.append(relative(path, file)).append('\0').append(Hashing.sha256(file)).append('\n');
         }
         return Hashing.sha256(manifest.toString());
+    }
+
+    /**
+     * Like {@link #hash(Path)}, but a jar/zip is hashed by its entries (name and content) instead of
+     * its bytes. Archive bytes include per-entry timestamps, so a jar re-packed from identical classes
+     * (every {@code mvn package} without {@code project.build.outputTimestamp}) would otherwise hash
+     * differently each build. Entry order and compression are ignored too.
+     */
+    public static String hashClasspathEntry(Path path) {
+        if (Files.isRegularFile(path) && isArchive(path)) {
+            try (ZipFile zip = new ZipFile(path.toFile())) {
+                List<? extends ZipEntry> entries = new ArrayList<>(Collections.list(zip.entries()));
+                entries.sort(Comparator.comparing(ZipEntry::getName));
+                StringBuilder manifest = new StringBuilder("archive\n");
+                for (ZipEntry e : entries) {
+                    if (e.isDirectory()) {
+                        continue;
+                    }
+                    MessageDigest digest = Hashing.newDigest();
+                    try (InputStream in = zip.getInputStream(e)) {
+                        byte[] buffer = new byte[64 * 1024];
+                        int n;
+                        while ((n = in.read(buffer)) > 0) {
+                            digest.update(buffer, 0, n);
+                        }
+                    }
+                    manifest.append(e.getName()).append('\0').append(HexFormat.of().formatHex(digest.digest()))
+                            .append('\n');
+                }
+                return Hashing.sha256(manifest.toString());
+            } catch (IOException e) {
+                return Hashing.sha256(path); // not a readable archive after all: fall back to bytes
+            }
+        }
+        return hash(path);
+    }
+
+    private static boolean isArchive(Path path) {
+        String name = path.getFileName().toString().toLowerCase(java.util.Locale.ROOT);
+        return name.endsWith(".jar") || name.endsWith(".zip") || name.endsWith(".war");
     }
 
     /** All regular files under {@code dir}, sorted by relative path. Empty if {@code dir} is missing. */
