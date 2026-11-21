@@ -79,21 +79,23 @@ public class TaskGraphCollector {
         p.put("poms", poms);
         p.put("externalDependencies", dependencies.externalDependencies(project, session));
 
-        // Phases that have hook phases bound in this project: Maven 3's pre-/post- brackets and
-        // Maven 4's before:/after: hooks. A hook and its phase share process-local state (a started
-        // server, a reserved port), so they must run in one Maven invocation.
-        java.util.Set<String> hooked = new java.util.HashSet<>();
+        // A phase and its hooks (Maven 4 before:/after:; Maven 3's generate-/process-/pre-/post- phases are
+        // aliases of those hooks) share process-local state, so they must run in one Maven invocation.
+        // Computed on the Maven 4 form for both versions, so the graph is the same on both.
+        Map<String, Integer> members = new java.util.HashMap<>();
         for (MojoExecution m : executions) {
-            String phase = m.getLifecyclePhase();
-            if (phase != null && !hookBase(phase).equals(phase)) {
-                hooked.add(hookBase(phase));
+            if (m.getLifecyclePhase() != null) {
+                members.merge(hookBase(hookForm(m.getLifecyclePhase())), 1, Integer::sum);
             }
         }
         List<Object> list = new ArrayList<>();
         for (MojoExecution m : executions) {
             Map<String, Object> e = execution(session, project, m, normalizer);
             String phase = m.getLifecyclePhase();
-            e.put("runTogether", phase != null && hooked.contains(hookBase(phase)) ? hookBase(phase) : null);
+            String base = phase == null ? null : hookBase(hookForm(phase));
+            e.put("canonicalPhase", phase == null ? null : canonicalPhase(phase));
+            e.put("runTogether", base != null && members.get(base) > 1
+                    && (!hookForm(phase).equals(base) || hasHookMember(executions, base)) ? base : null);
             list.add(e);
         }
         p.put("executions", list);
@@ -103,19 +105,54 @@ public class TaskGraphCollector {
         LOG.info("[mojo-io] GRAPH {}: {} execution(s) described, none run", project.getArtifactId(), list.size());
     }
 
-    /** Maven 3 brackets (clean, integration-test, site) and Maven 4 before:/after: hooks. */
+    /** Maven 3 phase names that Maven 4 defines as hooks of another phase (Maven 4 form -> Maven 3 name). */
+    static final Map<String, String> MAVEN3_ALIASES = Map.ofEntries(
+            Map.entry("before:clean", "pre-clean"), Map.entry("after:clean", "post-clean"),
+            Map.entry("before:sources", "generate-sources"), Map.entry("after:sources", "process-sources"),
+            Map.entry("before:resources", "generate-resources"), Map.entry("after:resources", "process-resources"),
+            Map.entry("after:compile", "process-classes"),
+            Map.entry("before:test-sources", "generate-test-sources"),
+            Map.entry("after:test-sources", "process-test-sources"),
+            Map.entry("before:test-resources", "generate-test-resources"),
+            Map.entry("after:test-resources", "process-test-resources"),
+            Map.entry("after:test-compile", "process-test-classes"),
+            Map.entry("before:package", "prepare-package"),
+            Map.entry("before:integration-test", "pre-integration-test"),
+            Map.entry("after:integration-test", "post-integration-test"),
+            Map.entry("before:site", "pre-site"), Map.entry("after:site", "post-site"));
+
+    /** Maven 4 hook form of a phase: process-resources -> after:resources; at:X -> X. */
+    static String hookForm(String phase) {
+        if (phase.startsWith("at:")) {
+            return phase.substring(3);
+        }
+        for (Map.Entry<String, String> e : MAVEN3_ALIASES.entrySet()) {
+            if (e.getValue().equals(phase)) {
+                return e.getKey();
+            }
+        }
+        return phase;
+    }
+
+    /** Maven 3 name of a phase where one exists (after:resources -> process-resources), else the phase. */
+    static String canonicalPhase(String phase) {
+        String form = hookForm(phase);
+        return MAVEN3_ALIASES.getOrDefault(form, form);
+    }
+
+    /** The phase a hook belongs to: before:X / after:X -> X. */
     static String hookBase(String phase) {
         for (String prefix : List.of("before:", "after:")) {
             if (phase.startsWith(prefix)) {
                 return phase.substring(prefix.length());
             }
         }
-        for (String base : List.of("clean", "integration-test", "site")) {
-            if (phase.equals("pre-" + base) || phase.equals("post-" + base)) {
-                return base;
-            }
-        }
         return phase;
+    }
+
+    private static boolean hasHookMember(List<MojoExecution> executions, String base) {
+        return executions.stream().anyMatch(m -> m.getLifecyclePhase() != null
+                && !hookForm(m.getLifecyclePhase()).equals(base) && hookBase(hookForm(m.getLifecyclePhase())).equals(base));
     }
 
     private Map<String, Object> execution(MavenSession session, MavenProject project, MojoExecution m,
@@ -197,6 +234,10 @@ public class TaskGraphCollector {
         o.put("path", path(n, out.path()));
         o.put("includes", out.includes());
         o.put("excludes", out.excludes());
+        if (out.observed()) {
+            // Known only after the run: the exact files are listed as `output` records in the stateFile.
+            o.put("observed", true);
+        }
         return o;
     }
 

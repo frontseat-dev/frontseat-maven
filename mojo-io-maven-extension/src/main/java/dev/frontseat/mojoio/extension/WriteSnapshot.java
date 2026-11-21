@@ -122,16 +122,28 @@ final class WriteSnapshot {
     }
 
     private static boolean covered(Path f, List<ResolvedOutput> outputs) {
-        for (ResolvedOutput o : outputs) {
-            Path p = o.path().toAbsolutePath().normalize();
-            if (f.equals(p)) {
-                return true;
+        return outputs.stream().anyMatch(o -> o.covers(f));
+    }
+
+    /**
+     * Files an observed output picked up: written (created or modified) during the run, under the
+     * build directory, matching its patterns, and not bookkeeping (ignored writes, Maven's own files).
+     */
+    static List<Path> observedFiles(Set<Path> changed, List<ResolvedOutput> outputs, Path buildDirectory,
+                                    List<String> ignoredWrites) {
+        List<String> ignored = new ArrayList<>(MAVEN_WRITES);
+        ignored.addAll(ignoredWrites);
+        List<Path> result = new ArrayList<>();
+        for (Path f : changed) {
+            if (!java.nio.file.Files.isRegularFile(f) || !f.startsWith(buildDirectory)
+                    || AntPattern.selected(FileTrees.relative(buildDirectory, f), ignored, List.of())) {
+                continue;
             }
-            if (f.startsWith(p) && AntPattern.selected(FileTrees.relative(p, f), o.includes(), o.excludes())) {
-                return true;
+            if (outputs.stream().anyMatch(o -> o.observed() && o.covers(f))) {
+                result.add(f);
             }
         }
-        return false;
+        return result;
     }
 
     Path basedir() {

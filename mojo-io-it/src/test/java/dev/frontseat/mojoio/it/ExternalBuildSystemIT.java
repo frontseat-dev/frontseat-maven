@@ -35,6 +35,8 @@ class ExternalBuildSystemIT {
         assertTrue(warm.stream().allMatch(ReferenceBuildSystem.Outcome::hit), warm.toString());
         assertTrue(Files.isRegularFile(b.dir().resolve("lib-core/target/classes/sample/core/Greeter.class")));
         assertTrue(Files.isRegularFile(b.dir().resolve("app/target/surefire-reports/TEST-sample.app.AppTest.xml")));
+        // Written by JaCoCo's agent inside the test JVM: an observed output, listed in the state file.
+        assertTrue(Files.isRegularFile(b.dir().resolve("lib-core/target/jacoco.exec")), "observed output restored");
 
         // Change one test: only that project's test-compile and test run, against restored upstream
         // outputs and replayed state (lib-core's artifact file, JaCoCo's argLine relocated to b).
@@ -55,6 +57,7 @@ class ExternalBuildSystemIT {
         assertTrue(Files.readString(b.dir().resolve("app/target/surefire-reports/TEST-sample.app.AppTest.xml"))
                 .contains("tests=\"3\""));
         assertTrue(Files.size(b.dir().resolve("app/target/jacoco.exec")) > 0, "agent attached via replayed state");
-        assertFalse(Files.exists(b.dir().resolve("lib-core/target/jacoco.exec")), "lib-core tests did not run");
+        assertTrue(Files.readString(b.dir().resolve("lib-core/target/surefire-reports/TEST-sample.core.GreeterTest.xml"))
+                .contains("tests=\"2\""), "lib-core results restored, not re-run");
     }
 }

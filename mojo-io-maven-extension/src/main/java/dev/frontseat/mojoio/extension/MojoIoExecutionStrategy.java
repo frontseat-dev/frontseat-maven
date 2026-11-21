@@ -20,6 +20,7 @@ import java.util.LinkedHashSet;
 import java.util.WeakHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
@@ -65,6 +66,9 @@ public class MojoIoExecutionStrategy implements MojosExecutionStrategy {
     private final org.apache.maven.project.MavenProjectHelper projectHelper;
     /** Projects whose recorded state was already replayed in this JVM's session(s). */
     private final Set<MavenProject> replayed = Collections.newSetFromMap(new WeakHashMap<>());
+    /** What replay applied, per project and execution identity (see StateFiles#replayPending). */
+    private final Map<MavenProject, Map<String, List<CacheEntry.StateRecord>>> replayedState =
+            Collections.synchronizedMap(new WeakHashMap<>());
 
     @Inject
     public MojoIoExecutionStrategy(DescriptorRegistry registry, DependencyResolution dependencyResolution,
@@ -99,14 +103,14 @@ public class MojoIoExecutionStrategy implements MojosExecutionStrategy {
         if (!config.runs(project)) {
             // Only here so others can resolve it: give it its recorded state, run nothing.
             if (config.state() && replayed.add(project)) {
-                StateFiles.replayPending(project, List.of(), normalizer, projectHelper);
+                replayedState.put(project, StateFiles.replayPending(project, List.of(), normalizer, projectHelper));
             }
             LOG.info(PREFIX + "ONLY  {} not selected by mojoio.only: {} execution(s) not run", project.getArtifactId(),
                     plan.size());
             return;
         }
         if (config.state() && replayed.add(project)) {
-            StateFiles.replayPending(project, plan, normalizer, projectHelper);
+            replayedState.put(project, StateFiles.replayPending(project, plan, normalizer, projectHelper));
         }
         LocalCache cache = config.cache() ? new LocalCache(config.cacheDir()) : null;
         for (MojoExecution m : plan) {
@@ -146,11 +150,12 @@ public class MojoIoExecutionStrategy implements MojosExecutionStrategy {
             }
         }
 
-        boolean strict = config.strict() != MojoIoConfig.Strict.OFF && descriptor.isPresent()
-                && structuralReason(m, descriptor.get()) == null;
+        boolean declared = descriptor.isPresent() && structuralReason(m, descriptor.get()) == null;
+        boolean strict = config.strict() != MojoIoConfig.Strict.OFF && declared;
+        boolean observing = declared && resolvedOutputs(ctx, descriptor.get()).stream().anyMatch(ResolvedOutput::observed);
         WriteSnapshot snapshot = null;
-        if (strict) {
-            if (config.cleanOutputs()) {
+        if (strict || observing) {
+            if (strict && config.cleanOutputs()) {
                 cleanDeclaredOutputs(ctx, descriptor.get(), label);
             }
             snapshot = WriteSnapshot.take(session, project);
@@ -161,17 +166,67 @@ public class MojoIoExecutionStrategy implements MojosExecutionStrategy {
         String incomplete = null;
         try {
             state = before.diff(ProjectState.capture(project), normalizer);
+            state = withReplayedEffects(project, m, state, normalizer);
         } catch (NotCacheableException e) {
             incomplete = e.getMessage();
+        }
+        Set<Path> changed = snapshot == null ? Set.of() : snapshot.changedSince(WriteSnapshot.take(session, project));
+        List<Path> observed = List.of();
+        if (observing) {
+            Path buildDirectory = Path.of(project.getBuild().getDirectory()).toAbsolutePath().normalize();
+            observed = WriteSnapshot.observedFiles(changed, resolvedOutputs(ctx, descriptor.get()), buildDirectory,
+                    descriptor.get().ignoredWrites());
+            if (state != null) {
+                state = new ArrayList<>(state);
+                for (Path f : observed) {
+                    // Informational record: tells external caches exactly which files to store.
+                    state.add(new CacheEntry.StateRecord(ProjectState.OUTPUT, "", normalizer.normalize(f.toString())));
+                }
+            }
         }
         if (config.state()) {
             StateFiles.record(project, m, state == null ? List.of() : state, incomplete);
         }
-        String undeclared = strict ? checkWrites(m, ctx, descriptor.get(), snapshot, config, label) : null;
+        String undeclared = strict ? checkWrites(m, ctx, descriptor.get(), snapshot, changed, config, label) : null;
         if (key != null) {
             store(m, ctx, normalizer.stamps(), cache, config, descriptor.get(), key, state,
-                    incomplete != null ? incomplete : undeclared, label);
+                    incomplete != null ? incomplete : undeclared, label, observed);
         }
+    }
+
+    private static List<ResolvedOutput> resolvedOutputs(ExecutionContext ctx, MojoCacheDescriptor descriptor) {
+        List<ResolvedOutput> outputs = new ArrayList<>();
+        try {
+            for (OutputSpec spec : descriptor.outputs()) {
+                outputs.addAll(spec.resolve(ctx));
+            }
+        } catch (NotCacheableException | RuntimeException e) {
+            LOG.debug(PREFIX + "cannot resolve outputs of {}", ctx.execution(), e);
+        }
+        return outputs;
+    }
+
+    /**
+     * If this execution's recorded state was replayed earlier in this build (it was not in the plan seen
+     * then), the diff around its run misses those changes: they were already there. Records that still
+     * hold are its own effects and are added back.
+     */
+    private List<CacheEntry.StateRecord> withReplayedEffects(MavenProject project, MojoExecution m,
+            List<CacheEntry.StateRecord> diff, PathNormalizer normalizer) {
+        Map<String, List<CacheEntry.StateRecord>> applied = replayedState.get(project);
+        List<CacheEntry.StateRecord> earlier = applied == null ? null
+                : applied.remove(StateFiles.identity(StateFiles.executionId(m)));
+        if (earlier == null || earlier.isEmpty()) {
+            return diff;
+        }
+        List<CacheEntry.StateRecord> merged = new ArrayList<>(diff);
+        for (CacheEntry.StateRecord r : earlier) {
+            boolean covered = diff.stream().anyMatch(d -> d.kind().equals(r.kind()) && Objects.equals(d.name(), r.name()));
+            if (!covered && ProjectState.holds(r, project, normalizer)) {
+                merged.add(r);
+            }
+        }
+        return merged;
     }
 
     /**
@@ -179,7 +234,7 @@ public class MojoIoExecutionStrategy implements MojosExecutionStrategy {
      * incomplete. Returns a reason not to store (or {@code null}); in {@code fail} mode, fails the build.
      */
     private String checkWrites(MojoExecution m, ExecutionContext ctx, MojoCacheDescriptor descriptor,
-                               WriteSnapshot snapshot, MojoIoConfig config, String label)
+                               WriteSnapshot snapshot, Set<Path> changed, MojoIoConfig config, String label)
             throws LifecycleExecutionException {
         List<String> undeclared;
         try {
@@ -187,9 +242,8 @@ public class MojoIoExecutionStrategy implements MojosExecutionStrategy {
             for (OutputSpec spec : descriptor.outputs()) {
                 outputs.addAll(spec.resolve(ctx));
             }
-            WriteSnapshot after = WriteSnapshot.take(ctx.session(), ctx.project());
             Path buildDirectory = Path.of(ctx.project().getBuild().getDirectory()).toAbsolutePath().normalize();
-            undeclared = WriteSnapshot.undeclared(snapshot.changedSince(after), outputs, buildDirectory,
+            undeclared = WriteSnapshot.undeclared(changed, outputs, buildDirectory,
                     descriptor.ignoredWrites(), snapshot.basedir());
         } catch (NotCacheableException | RuntimeException e) {
             LOG.debug(PREFIX + "cannot check writes of {}", label, e);
@@ -260,7 +314,7 @@ public class MojoIoExecutionStrategy implements MojosExecutionStrategy {
 
     private void store(MojoExecution m, ExecutionContext ctx, Stamps stamps, LocalCache cache, MojoIoConfig config,
                        MojoCacheDescriptor descriptor, CacheKey key, List<CacheEntry.StateRecord> state,
-                       String incomplete, String label) {
+                       String incomplete, String label, List<Path> observed) {
         String hash = key.hash();
         if (!config.write()) {
             LOG.info(PREFIX + "MISS  {} [{}] (cache writes disabled)", label, shortHash(hash));
@@ -274,6 +328,13 @@ public class MojoIoExecutionStrategy implements MojosExecutionStrategy {
             Map<String, Path> outputs = new TreeMap<>();
             List<LocalCache.StoredFile> files = new ArrayList<>();
             String unstampable = null;
+            for (Path f : observed) {
+                Path abs = f.toAbsolutePath().normalize();
+                if (!abs.startsWith(ctx.basedir())) {
+                    throw new NotCacheableException("output " + abs + " is outside the project directory");
+                }
+                outputs.put(FileTrees.relative(ctx.basedir(), abs), abs);
+            }
             for (OutputSpec spec : descriptor.outputs()) {
                 for (ResolvedOutput output : spec.resolve(ctx)) {
                     for (Path file : output.existingFiles()) {

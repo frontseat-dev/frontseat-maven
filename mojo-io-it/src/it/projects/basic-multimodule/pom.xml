@@ -58,6 +58,8 @@
           <artifactId>maven-surefire-plugin</artifactId>
           <version>3.5.2</version>
           <configuration>
+            <!-- Late replacement: surefire substitutes @{argLine} at run time, after JaCoCo set it. -->
+            <argLine>@{argLine} -Xmx256m</argLine>
             <systemPropertyVariables>
               <expectedVersion>${project.version}</expectedVersion>
             </systemPropertyVariables>

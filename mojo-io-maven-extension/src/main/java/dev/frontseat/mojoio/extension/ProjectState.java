@@ -155,6 +155,24 @@ final class ProjectState {
         }
     }
 
+    /** Whether {@code r}'s effect is (still) visible on {@code project}. */
+    static boolean holds(StateRecord r, MavenProject project, PathNormalizer n) {
+        String value = n.denormalize(r.value());
+        return switch (r.kind()) {
+            case COMPILE_SOURCE_ROOT -> project.getCompileSourceRoots().contains(value);
+            case TEST_COMPILE_SOURCE_ROOT -> project.getTestCompileSourceRoots().contains(value);
+            case PROPERTY -> Objects.equals(project.getProperties().getProperty(r.name()), value);
+            case PROPERTY_REMOVED -> !project.getProperties().containsKey(r.name());
+            case ARTIFACT_FILE -> project.getArtifact() != null && project.getArtifact().getFile() != null
+                    && project.getArtifact().getFile().getAbsolutePath().equals(value);
+            case ATTACHED_ARTIFACT -> project.getAttachedArtifacts().stream().anyMatch(a ->
+                    attachmentId(a.getType(), a.getClassifier()).equals(r.name()));
+            case SYSTEM_PROPERTY -> Objects.equals(System.getProperty(r.name()), value);
+            case SYSTEM_PROPERTY_REMOVED -> System.getProperty(r.name()) == null;
+            default -> false;
+        };
+    }
+
     static String attachmentId(String type, String classifier) {
         return type + ":" + (classifier == null ? "" : classifier);
     }

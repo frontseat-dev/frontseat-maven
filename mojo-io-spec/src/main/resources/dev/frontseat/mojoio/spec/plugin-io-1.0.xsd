@@ -125,6 +125,15 @@
           <xs:attribute name="outputDirectoryParameter" type="xs:string" use="required"/>
         </xs:complexType>
       </xs:element>
+      <!-- Whatever the mojo writes in the build directory while it runs, measured at run time: for
+           mojos that run arbitrary code with hooks of its own (tests, agents such as JaCoCo, forked
+           tools). includes/excludes are Ant patterns relative to the build directory. -->
+      <xs:element name="observed">
+        <xs:complexType>
+          <xs:attribute name="includes" type="xs:string" default="**"/>
+          <xs:attribute name="excludes" type="xs:string"/>
+        </xs:complexType>
+      </xs:element>
       <!-- destfile= targets of -javaagent options in a command-line parameter (coverage data). -->
       <xs:element name="javaagentDestFiles" type="ParameterRef"/>
     </xs:choice>

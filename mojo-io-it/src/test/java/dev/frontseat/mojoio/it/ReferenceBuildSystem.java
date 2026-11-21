@@ -108,7 +108,7 @@ final class ReferenceBuildSystem {
         for (JsonNode e : project.get("executions")) {
             JsonNode together = e.get("runTogether");
             String phase = respectRunTogether && together != null && !together.isNull()
-                    ? together.asText() : e.get("phase").asText();
+                    ? together.asText() : e.get("canonicalPhase").asText();
             byPhase.computeIfAbsent(phase, p -> new Task(project.get("id").asText(), project.get("path").asText(),
                     p, new ArrayList<>())).executions().add(e);
         }
@@ -147,13 +147,27 @@ final class ReferenceBuildSystem {
     private void store(Task task, Path dir, Path entry) throws IOException {
         Path tmp = entry.resolveSibling(entry.getFileName() + ".tmp");
         for (JsonNode e : task.executions()) {
+            Path state = resolve(e.get("stateFile").asText(), dir);
             for (JsonNode out : e.get("outputs")) {
+                if (out.path("observed").asBoolean(false)) {
+                    // Known only now: the state file lists exactly what was written.
+                    if (Files.isRegularFile(state)) {
+                        for (dev.frontseat.mojoio.spec.StateChange c : dev.frontseat.mojoio.spec.StateFile.read(state).changes()) {
+                            if (c.kind().equals("output")) {
+                                Path f = Path.of(c.value().replace("@@BASEDIR@@", dir.toString()));
+                                if (Files.isRegularFile(f)) {
+                                    copy(f, tmp.resolve(dir.relativize(f)));
+                                }
+                            }
+                        }
+                    }
+                    continue;
+                }
                 Path p = resolve(out.get("path").asText(), dir);
                 for (Path f : files(p, texts(out.get("includes")), texts(out.get("excludes")))) {
                     copy(f, tmp.resolve(dir.relativize(f)));
                 }
             }
-            Path state = resolve(e.get("stateFile").asText(), dir);
             if (Files.isRegularFile(state)) {
                 copy(state, tmp.resolve(dir.relativize(state)));
             }

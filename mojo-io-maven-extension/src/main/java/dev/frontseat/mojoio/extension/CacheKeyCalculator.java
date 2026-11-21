@@ -55,7 +55,13 @@ final class CacheKeyCalculator {
             case FILES -> {
                 List<String> parts = new ArrayList<>();
                 for (Path p : input.paths()) {
-                    parts.add(ctx.normalizer().normalize(p.toString()) + " " + filesHash(p, input, filter));
+                    String h = filesHash(p, input, filter);
+                    if (h.equals(FileTrees.ABSENT)) {
+                        // A path with no content contributes nothing: whether a source root that does not
+                        // exist yet is listed depends on mojo order (e.g. replayed state), not on content.
+                        continue;
+                    }
+                    parts.add(ctx.normalizer().normalize(p.toString()) + " " + h);
                 }
                 yield String.join(";", parts);
             }
@@ -77,6 +83,9 @@ final class CacheKeyCalculator {
             if (AntPattern.selected(rel, input.includes(), input.excludes())) {
                 sb.append(rel).append('=').append(FileTrees.hash(f, filter)).append(';');
             }
+        }
+        if (sb.length() == 0) {
+            return FileTrees.ABSENT;
         }
         return Hashing.sha256("includes=" + input.includes() + " excludes=" + input.excludes() + " " + sb);
     }

@@ -31,6 +31,7 @@ the goals you want described; `verify` covers the default lifecycle up to packag
       "plugin": "org.apache.maven.plugins:maven-compiler-plugin", "version": "3.13.0",
       "goal": "compile", "executionId": "default-compile", "phase": "compile",
       "invocation": "org.apache.maven.plugins:maven-compiler-plugin:3.13.0:compile@default-compile",
+      "canonicalPhase": "compile",         // Maven 3 name (Maven 4 reports e.g. "after:resources" = "process-resources")
       "runTogether": null,                 // or e.g. "integration-test" for a phase and its hooks
       "fingerprint": "9f2c…",              // config + plugin + JDK + values; null if not cacheable
       "declaredBy": "built-in",            // or "plugin …", "project .mvn/plugin-io/x.xml", or null
@@ -78,7 +79,7 @@ resolve its upstream module, and JaCoCo's agent isn't attached.
 
 What a build system (Nx, Bazel, Turborepo, a CI cache, …) needs, all in the graph:
 
-1. **Tasks.** Group a project's executions by `phase`. Executions sharing a `runTogether` value (a phase
+1. **Tasks.** Group a project's executions by `canonicalPhase`, which is the same on Maven 3 and 4. Executions sharing a `runTogether` value (a phase
    with its `pre-`/`post-` or Maven 4 `before:`/`after:` hooks) **must** be one task. Hooks hold
    process-local state: a server started in `pre-integration-test` dies with that Maven process.
 2. **Task hash.** Combine:
@@ -89,7 +90,9 @@ What a build system (Nx, Bazel, Turborepo, a CI cache, …) needs, all in the gr
    - the hashes of the `dependsOn` projects' tasks (that's the classpath);
    - the previous task of the same project.
    In Nx, put the fingerprints into the task's options, which Nx hashes.
-3. **Cache.** Store each member's `outputs` and its `stateFile`. On a hit, copy them back.
+3. **Cache.** Store each member's `outputs` and its `stateFile`. An output with `"observed": true` (tests,
+   agents) is known only after the run: store the files listed as `output` records in the state file.
+   On a hit, copy everything back.
 4. **Run one task.** Run
    `mvn -pl <id> -am -Dmojoio.only=<id> -Dmojoio.prerequisites=false -Dmojoio.cache.enabled=false <invocation>...`.
    - `-am` puts the upstream projects in the reactor, so their restored outputs resolve.

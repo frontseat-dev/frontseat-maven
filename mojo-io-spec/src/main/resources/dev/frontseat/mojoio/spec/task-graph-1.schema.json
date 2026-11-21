@@ -39,6 +39,7 @@
         "executionId": { "type": "string" },
         "phase": { "type": ["string", "null"], "description": "Lifecycle phase, null for goals invoked directly." },
         "invocation": { "type": "string", "description": "Runs exactly this execution when passed to mvn as a goal (groupId:artifactId:version:goal@executionId)." },
+        "canonicalPhase": { "type": ["string", "null"], "description": "The Maven 3 name of the phase (Maven 4 reports hooks, e.g. after:resources = process-resources); identical across Maven versions." },
         "runTogether": { "type": ["string", "null"], "description": "Executions sharing this value (a phase and its pre-/post- or before:/after: hooks) must run in one Maven invocation: hooks hold process-local state such as a started server." },
         "fingerprint": { "type": ["string", "null"], "description": "Hash of what a build system cannot hash itself: plugin coordinates and dependencies, goal, JDK, evaluated configuration and value inputs. Includes stamp values. Null when not cacheable." },
         "declaredBy": { "type": ["string", "null"], "description": "Source of the plugin-io declaration (project file, plugin jar, built-in), null if undeclared." },
@@ -69,6 +70,7 @@
       "properties": {
         "name": { "type": "string" },
         "path": { "type": "string", "description": "A file, or a directory narrowed by includes/excludes." },
+        "observed": { "type": "boolean", "description": "Known only after the run: the exact files are listed as `output` records in the stateFile." },
         "includes": { "type": "array", "items": { "type": "string" } },
         "excludes": { "type": "array", "items": { "type": "string" } }
       }
