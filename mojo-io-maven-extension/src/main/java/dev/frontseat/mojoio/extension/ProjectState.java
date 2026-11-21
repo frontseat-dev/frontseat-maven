@@ -51,7 +51,7 @@ final class ProjectState {
     /** type:classifier -> file, in attachment order. */
     private final Map<String, String> attachedArtifacts;
 
-    private ProjectState(MavenProject project) {
+    private ProjectState(MavenProject project, boolean trackSystemProperties) {
         compileSourceRoots = new ArrayList<>(project.getCompileSourceRoots());
         testCompileSourceRoots = new ArrayList<>(project.getTestCompileSourceRoots());
         resources = describe(project.getResources());
@@ -61,7 +61,7 @@ final class ProjectState {
         File file = project.getArtifact() == null ? null : project.getArtifact().getFile();
         artifactFile = file == null ? null : file.getAbsolutePath();
         systemProperties = new TreeMap<>();
-        System.getProperties().forEach((k, v) -> {
+        (trackSystemProperties ? System.getProperties() : new java.util.Properties()).forEach((k, v) -> {
             String name = String.valueOf(k);
             if (JVM_PREFIXES.stream().noneMatch(name::startsWith)) {
                 systemProperties.put(name, String.valueOf(v));
@@ -75,7 +75,11 @@ final class ProjectState {
     }
 
     static ProjectState capture(MavenProject project) {
-        return new ProjectState(project);
+        return new ProjectState(project, true);
+    }
+
+    static ProjectState capture(MavenProject project, boolean systemProperties) {
+        return new ProjectState(project, systemProperties);
     }
 
     /** Normalized records that turn {@code this} into {@code after}. */

@@ -10,6 +10,8 @@ java = "temurin-21"
 # The first Maven is the one on PATH and builds this repo. The second is used only as the Maven the
 # integration tests fork (`mise run it:maven4`), to keep the extension working on both lines.
 maven = ["3.9.11", "4.0.0-rc-7"]
+# Maven Daemon: how build systems avoid paying JVM + Maven startup per task (`mise run it:mvnd`).
+mvnd = "1.0.6"
 
 [env]
 # Maven 3.9+ reads MAVEN_ARGS; keep logs CI-friendly everywhere.
@@ -35,9 +37,25 @@ m4="$(mise where "maven@${MOJOIO_MAVEN4}")/apache-maven-${MOJOIO_MAVEN4}"
 mvn verify -pl mojo-io-it -am "-Dmojoio.it.maven.home=${m4}" "-Dmojoio.it.expectMavenVersion=${MOJOIO_MAVEN4}"
 '''
 
+[tasks."it:mvnd"]
+description = "Integration tests forking the Maven Daemon (mvnd): one long-lived, parallel JVM for all builds"
+run = '''
+home="${MOJOIO_MVND_HOME:-$(mise where mvnd)}"
+mvn verify -pl mojo-io-it -am "-Dmojoio.it.maven.home=${home}"
+mvnd="${home}/bin/mvnd"; [ -x "$mvnd" ] && "$mvnd" --stop >/dev/null 2>&1 || true
+'''
+
+[tasks."registry:check"]
+description = "Check every parameter the built-in plugin-io declarations reference against real plugin.xml files"
+run = "java registry/Check.java"
+
+[tasks.perf]
+description = "Benchmark raw Maven vs mojo-io (and mvnd) on a generated 20-module project"
+run = "java perf/Bench.java"
+
 [tasks.ci]
-description = "Everything CI checks: ITs on Maven 3.9, then on Maven 4"
-run = ["mise run it", "mise run it:maven4"]
+description = "Everything CI checks: ITs on Maven 3.9, on Maven 4, and through mvnd"
+run = ["mise run it", "mise run it:maven4", "mise run it:mvnd"]
 
 [tasks.install]
 description = "Install to ~/.m2 so projects can load the extension via .mvn/extensions.xml"

@@ -64,11 +64,46 @@ public class MojoIoExecutionStrategy implements MojosExecutionStrategy {
     private final PrerequisiteExpander prerequisites;
     private final TaskGraphCollector graph;
     private final org.apache.maven.project.MavenProjectHelper projectHelper;
-    /** Projects whose recorded state was already replayed in this JVM's session(s). */
-    private final Set<MavenProject> replayed = Collections.newSetFromMap(new WeakHashMap<>());
-    /** What replay applied, per project and execution identity (see StateFiles#replayPending). */
-    private final Map<MavenProject, Map<String, List<CacheEntry.StateRecord>>> replayedState =
+    /**
+     * What replay applied, per build session, project id and execution identity (see
+     * StateFiles#replayPending); a project id is present once it has been replayed. Keyed by session, not
+     * by MavenProject: MavenProject's equals() is by coordinates, so in a long-lived JVM (mvnd) the same
+     * module from an earlier build would count as already replayed. Thread-safe for parallel builders.
+     */
+    private final Map<MavenSession, Map<String, Map<String, List<CacheEntry.StateRecord>>>> replayedState =
             Collections.synchronizedMap(new WeakHashMap<>());
+
+    /**
+     * Per build and project: how many executions ran, and the snapshot taken after the last one that took
+     * one. If the next execution is declared too, that snapshot is its "before": nothing ran in between.
+     * Halves the directory walks of strict mode and observed outputs.
+     */
+    private static final class ProjectRun {
+        int executions;
+        int snapshotAt = -1;
+        WriteSnapshot snapshot;
+    }
+
+    private final Map<MavenSession, Map<String, ProjectRun>> runs = Collections.synchronizedMap(new WeakHashMap<>());
+
+    private ProjectRun run(MavenSession session, MavenProject project) {
+        return runs.computeIfAbsent(session, s -> new java.util.concurrent.ConcurrentHashMap<>())
+                .computeIfAbsent(project.getGroupId() + ":" + project.getArtifactId(), k -> new ProjectRun());
+    }
+
+    /** Replays {@code project}'s pending state once per build; returns false if already done. */
+    private boolean replayOnce(MavenSession session, MavenProject project, List<MojoExecution> plan,
+                               PathNormalizer normalizer) {
+        Map<String, Map<String, List<CacheEntry.StateRecord>>> projects =
+                replayedState.computeIfAbsent(session, s -> new java.util.concurrent.ConcurrentHashMap<>());
+        String id = project.getGroupId() + ":" + project.getArtifactId();
+        if (projects.containsKey(id)) {
+            return false;
+        }
+        projects.put(id, new java.util.concurrent.ConcurrentHashMap<>(
+                StateFiles.replayPending(project, plan, normalizer, projectHelper)));
+        return true;
+    }
 
     @Inject
     public MojoIoExecutionStrategy(DescriptorRegistry registry, DependencyResolution dependencyResolution,
@@ -102,15 +137,15 @@ public class MojoIoExecutionStrategy implements MojosExecutionStrategy {
         PathNormalizer normalizer = normalizer(session, project).withStamps(StampValues.of(session, project));
         if (!config.runs(project)) {
             // Only here so others can resolve it: give it its recorded state, run nothing.
-            if (config.state() && replayed.add(project)) {
-                replayedState.put(project, StateFiles.replayPending(project, List.of(), normalizer, projectHelper));
+            if (config.state()) {
+                replayOnce(session, project, List.of(), normalizer);
             }
             LOG.info(PREFIX + "ONLY  {} not selected by mojoio.only: {} execution(s) not run", project.getArtifactId(),
                     plan.size());
             return;
         }
-        if (config.state() && replayed.add(project)) {
-            replayedState.put(project, StateFiles.replayPending(project, plan, normalizer, projectHelper));
+        if (config.state()) {
+            replayOnce(session, project, plan, normalizer);
         }
         LocalCache cache = config.cache() ? new LocalCache(config.cacheDir()) : null;
         for (MojoExecution m : plan) {
@@ -126,6 +161,8 @@ public class MojoIoExecutionStrategy implements MojosExecutionStrategy {
                             LocalCache cache, MojoIoConfig config, PathNormalizer normalizer)
             throws LifecycleExecutionException {
         String label = label(m, project);
+        ProjectRun projectRun = run(session, project);
+        int sequence = ++projectRun.executions;
         Optional<MojoCacheDescriptor> descriptor = registry.find(m, session);
         // `normalizer` tokenizes stamps (used for paths and state). The key only does so for mojos that
         // merely carry stamp values; for the others the values stay in the key.
@@ -158,19 +195,30 @@ public class MojoIoExecutionStrategy implements MojosExecutionStrategy {
             if (strict && config.cleanOutputs()) {
                 cleanDeclaredOutputs(ctx, descriptor.get(), label);
             }
-            snapshot = WriteSnapshot.take(session, project);
+            snapshot = projectRun.snapshotAt == sequence - 1 && projectRun.snapshot != null
+                    && !(strict && config.cleanOutputs())
+                    ? projectRun.snapshot : WriteSnapshot.take(session, project);
         }
-        ProjectState before = ProjectState.capture(project);
+        // System properties are JVM-wide: with modules building in parallel (-T, mvnd) another module's
+        // change would be attributed to this mojo, so they are only tracked in sequential builds.
+        boolean trackSystemProperties = !session.isParallel();
+        ProjectState before = ProjectState.capture(project, trackSystemProperties);
         runner.run(m);
         List<CacheEntry.StateRecord> state = null;
         String incomplete = null;
         try {
-            state = before.diff(ProjectState.capture(project), normalizer);
-            state = withReplayedEffects(project, m, state, normalizer);
+            state = before.diff(ProjectState.capture(project, trackSystemProperties), normalizer);
+            state = withReplayedEffects(session, project, m, state, normalizer);
         } catch (NotCacheableException e) {
             incomplete = e.getMessage();
         }
-        Set<Path> changed = snapshot == null ? Set.of() : snapshot.changedSince(WriteSnapshot.take(session, project));
+        Set<Path> changed = Set.of();
+        if (snapshot != null) {
+            WriteSnapshot after = WriteSnapshot.take(session, project);
+            changed = snapshot.changedSince(after);
+            projectRun.snapshot = after;
+            projectRun.snapshotAt = sequence;
+        }
         List<Path> observed = List.of();
         if (observing) {
             Path buildDirectory = Path.of(project.getBuild().getDirectory()).toAbsolutePath().normalize();
@@ -211,9 +259,11 @@ public class MojoIoExecutionStrategy implements MojosExecutionStrategy {
      * then), the diff around its run misses those changes: they were already there. Records that still
      * hold are its own effects and are added back.
      */
-    private List<CacheEntry.StateRecord> withReplayedEffects(MavenProject project, MojoExecution m,
+    private List<CacheEntry.StateRecord> withReplayedEffects(MavenSession session, MavenProject project, MojoExecution m,
             List<CacheEntry.StateRecord> diff, PathNormalizer normalizer) {
-        Map<String, List<CacheEntry.StateRecord>> applied = replayedState.get(project);
+        Map<String, Map<String, List<CacheEntry.StateRecord>>> projects = replayedState.get(session);
+        Map<String, List<CacheEntry.StateRecord>> applied = projects == null ? null
+                : projects.get(project.getGroupId() + ":" + project.getArtifactId());
         List<CacheEntry.StateRecord> earlier = applied == null ? null
                 : applied.remove(StateFiles.identity(StateFiles.executionId(m)));
         if (earlier == null || earlier.isEmpty()) {

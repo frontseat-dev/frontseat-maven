@@ -41,8 +41,8 @@ final class CacheKeyCalculator {
 
     /** The cache's view of a resolved input: content, not timestamps or absolute locations. */
     static String hash(ExecutionContext ctx, ResolvedInput input) {
-        java.util.function.UnaryOperator<byte[]> filter = ctx.normalizer().stamps().isEmpty() ? null
-                : ctx.normalizer().stamps()::tokenizeContent;
+        dev.frontseat.mojoio.cache.ContentFilter filter = ctx.normalizer().stamps().isEmpty() ? null
+                : ctx.normalizer().stamps().contentFilter();
         return switch (input.kind()) {
             case VALUE -> input.value() == null ? "null" : input.value();
             case CLASSPATH -> {
@@ -73,7 +73,7 @@ final class CacheKeyCalculator {
         return Hashing.sha256(key + "|stamps=" + stamps.values());
     }
 
-    private static String filesHash(Path p, ResolvedInput input, java.util.function.UnaryOperator<byte[]> filter) {
+    private static String filesHash(Path p, ResolvedInput input, dev.frontseat.mojoio.cache.ContentFilter filter) {
         if (input.includes().isEmpty() && input.excludes().isEmpty()) {
             return FileTrees.hash(p, filter);
         }

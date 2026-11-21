@@ -45,6 +45,10 @@ class HookBracketsIT {
         assertTrue(Files.isRegularFile(build.dir().resolve("target/failsafe-reports/TEST-sample.hooks.ServerIT.xml")));
 
         // Control: splitting the bracket into per-phase tasks loses the "server" between processes.
+        // Not under mvnd: there the "process" is the daemon, and the server outlives each invocation.
+        if (MavenBuild.daemon()) {
+            return;
+        }
         MavenBuild split = MavenBuild.checkout("it-hooks", "hooks-run", "split", cache);
         ReferenceBuildSystem.TaskFailed failed = assertThrows(ReferenceBuildSystem.TaskFailed.class,
                 () -> new ReferenceBuildSystem(split, MavenBuild.cacheDir("hooks-split-bs"), false).build("verify"));

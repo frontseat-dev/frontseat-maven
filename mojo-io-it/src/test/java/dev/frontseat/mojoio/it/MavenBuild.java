@@ -56,6 +56,17 @@ final class MavenBuild {
         return Path.of(override != null && !override.isBlank() ? override : System.getProperty("maven.home"));
     }
 
+    /** {@code bin/mvnd} when the forked Maven home is a Maven Daemon distribution, else {@code bin/mvn}. */
+    static Path executable() {
+        Path mvnd = mavenHome().resolve("bin").resolve("mvnd");
+        return Files.isRegularFile(mvnd) ? mvnd : mavenHome().resolve("bin").resolve("mvn");
+    }
+
+    /** Whether the ITs run through the Maven Daemon (one long-lived, parallel JVM for all builds). */
+    static boolean daemon() {
+        return executable().getFileName().toString().equals("mvnd");
+    }
+
     Path dir() {
         return projectDir;
     }
@@ -77,7 +88,7 @@ final class MavenBuild {
 
     Result runAllowingFailure(String... goals) {
         List<String> cmd = new ArrayList<>();
-        cmd.add(mavenHome().resolve("bin").resolve("mvn").toString());
+        cmd.add(executable().toString());
         cmd.add("-B");
         cmd.add("-V"); // print the Maven version, so logs show which Maven line was exercised
         cmd.add("-Dmaven.ext.class.path=" + System.getProperty("mojoio.ext.classpath"));
