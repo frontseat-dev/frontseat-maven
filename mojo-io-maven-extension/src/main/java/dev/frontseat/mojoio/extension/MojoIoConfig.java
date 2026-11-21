@@ -18,12 +18,22 @@ import org.apache.maven.execution.MavenSession;
  *   <li>{@code mojoio.cache.enabled} (default {@code true}): the built-in local cache.</li>
  *   <li>{@code mojoio.cache.dir} (default {@code ~/.m2/mojo-io-cache}),
  *       {@code mojoio.cache.read} / {@code mojoio.cache.write} (default {@code true}).</li>
+ *   <li>{@code mojoio.only} (default unset): comma-separated project ids ({@code groupId:artifactId} or
+ *       {@code artifactId}). Other projects in the reactor replay their state but run no mojos, so
+ *       {@code -pl app -am -Dmojoio.only=app} builds only {@code app} against its upstream modules'
+ *       restored outputs (how an external build system runs one task).</li>
  *   <li>{@code mojoio.prerequisites} (default {@code true}): when a goal such as
  *       {@code surefire:test} is invoked directly, first run (or restore) the lifecycle it depends on.</li>
  * </ul>
  */
 public record MojoIoConfig(boolean enabled, boolean state, Path graphOutput, boolean cache, Path cacheDir,
-                           boolean read, boolean write, boolean prerequisites) {
+                           boolean read, boolean write, boolean prerequisites, java.util.Set<String> only) {
+
+    /** Whether {@code project}'s mojos should run (see {@code mojoio.only}). */
+    public boolean runs(org.apache.maven.project.MavenProject project) {
+        return only.isEmpty() || only.contains(project.getArtifactId())
+                || only.contains(project.getGroupId() + ":" + project.getArtifactId());
+    }
 
     public static MojoIoConfig from(MavenSession session) {
         Properties user = session.getUserProperties();
@@ -41,7 +51,9 @@ public record MojoIoConfig(boolean enabled, boolean state, Path graphOutput, boo
                 Paths.get(dir).toAbsolutePath().normalize(),
                 bool(user, system, "mojoio.cache.read", true),
                 bool(user, system, "mojoio.cache.write", true),
-                bool(user, system, "mojoio.prerequisites", true));
+                bool(user, system, "mojoio.prerequisites", true),
+                java.util.Set.of(get(user, system, "mojoio.only", "").split("\\s*,\\s*")).stream()
+                        .filter(x -> !x.isBlank()).collect(java.util.stream.Collectors.toUnmodifiableSet()));
     }
 
     private static String get(Properties user, Properties system, String name, String def) {

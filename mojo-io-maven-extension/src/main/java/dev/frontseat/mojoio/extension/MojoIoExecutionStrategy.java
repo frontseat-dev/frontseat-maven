@@ -96,6 +96,15 @@ public class MojoIoExecutionStrategy implements MojosExecutionStrategy {
                 ? prerequisites.expand(executions, session, project)
                 : executions;
         PathNormalizer normalizer = normalizer(session, project).withStamps(StampValues.of(session, project));
+        if (!config.runs(project)) {
+            // Only here so others can resolve it: give it its recorded state, run nothing.
+            if (config.state() && replayed.add(project)) {
+                StateFiles.replayPending(project, List.of(), normalizer, projectHelper);
+            }
+            LOG.info(PREFIX + "ONLY  {} not selected by mojoio.only: {} execution(s) not run", project.getArtifactId(),
+                    plan.size());
+            return;
+        }
         if (config.state() && replayed.add(project)) {
             StateFiles.replayPending(project, plan, normalizer, projectHelper);
         }
