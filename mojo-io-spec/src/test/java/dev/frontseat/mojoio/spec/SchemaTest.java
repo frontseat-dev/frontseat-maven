@@ -38,6 +38,7 @@ class SchemaTest {
                         <file parameter="outputDirectory" name="{finalName}{-classifier}.jar"/>
                       </outputs>
                       <ignoredParameters>x</ignoredParameters>
+                      <ignoredWrites>maven-status/**</ignoredWrites>
                     </mojo>
                     <mojo goal="b" cacheable="false" reason="r"/>
                   </plugin>

@@ -115,21 +115,28 @@ public final class PluginIoReader {
             throw new PluginIoException(source + ": <mojo> requires a goal");
         }
         String cacheable = attr(mojo, "cacheable");
-        Set<String> ignored = new LinkedHashSet<>();
-        for (Element e : children(mojo, "ignoredParameters")) {
-            for (String p : e.getTextContent().split("[,\\s]+")) {
-                if (!p.isBlank()) {
-                    ignored.add(p.trim());
-                }
-            }
-        }
+        Set<String> ignored = list(mojo, "ignoredParameters");
+        Set<String> ignoredWrites = list(mojo, "ignoredWrites");
         try {
             return new MojoIo(goal, cacheable == null || Boolean.parseBoolean(cacheable), attr(mojo, "reason"),
                     attr(mojo, "prerequisitePhase"), declarations(mojo, "inputs"), declarations(mojo, "outputs"),
-                    ignored, "carry".equals(attr(mojo, "stamping")));
+                    ignored, ignoredWrites, "carry".equals(attr(mojo, "stamping")));
         } catch (PluginIoException e) {
             throw new PluginIoException(source + ": " + e.getMessage(), e);
         }
+    }
+
+    /** Comma- or whitespace-separated values of a child element. */
+    private static Set<String> list(Element mojo, String name) {
+        Set<String> values = new LinkedHashSet<>();
+        for (Element e : children(mojo, name)) {
+            for (String p : e.getTextContent().split("[,\\s]+")) {
+                if (!p.isBlank()) {
+                    values.add(p.trim());
+                }
+            }
+        }
+        return values;
     }
 
     private static List<IoDeclaration> declarations(Element mojo, String section) {
