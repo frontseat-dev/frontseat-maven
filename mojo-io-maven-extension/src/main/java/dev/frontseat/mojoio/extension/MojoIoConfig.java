@@ -18,12 +18,19 @@ import org.apache.maven.execution.MavenSession;
  *   <li>{@code mojoio.cache.enabled} (default {@code true}): the built-in local cache.</li>
  *   <li>{@code mojoio.cache.dir} (default {@code ~/.m2/mojo-io-cache}),
  *       {@code mojoio.cache.read} / {@code mojoio.cache.write} (default {@code true}).</li>
+ *   <li>{@code mojoio.strict} ({@code off}, {@code warn} (default), {@code fail}): report files a declared
+ *       mojo writes outside its declared outputs; such executions are never stored, and {@code fail}
+ *       fails the build.</li>
+ *   <li>{@code mojoio.strict.cleanOutputs} (default {@code false}): delete declared outputs before a
+ *       declared mojo runs, so leftovers (e.g. classes of deleted sources) never reach an entry.</li>
  *   <li>{@code mojoio.prerequisites} (default {@code true}): when a goal such as
  *       {@code surefire:test} is invoked directly, first run (or restore) the lifecycle it depends on.</li>
  * </ul>
  */
 public record MojoIoConfig(boolean enabled, boolean state, Path graphOutput, boolean cache, Path cacheDir,
-                           boolean read, boolean write, boolean prerequisites) {
+                           boolean read, boolean write, boolean prerequisites, Strict strict, boolean cleanOutputs) {
+
+    public enum Strict { OFF, WARN, FAIL }
 
     public static MojoIoConfig from(MavenSession session) {
         Properties user = session.getUserProperties();
@@ -41,7 +48,9 @@ public record MojoIoConfig(boolean enabled, boolean state, Path graphOutput, boo
                 Paths.get(dir).toAbsolutePath().normalize(),
                 bool(user, system, "mojoio.cache.read", true),
                 bool(user, system, "mojoio.cache.write", true),
-                bool(user, system, "mojoio.prerequisites", true));
+                bool(user, system, "mojoio.prerequisites", true),
+                Strict.valueOf(get(user, system, "mojoio.strict", "warn").toUpperCase(java.util.Locale.ROOT)),
+                bool(user, system, "mojoio.strict.cleanOutputs", false));
     }
 
     private static String get(Properties user, Properties system, String name, String def) {

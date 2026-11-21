@@ -47,6 +47,8 @@
         compileSourceRoots, compilePath,
         showCompilationChanges, skipMultiThreadWarning, compilerReuseStrategy, verbose, staleMillis
       </ignoredParameters>
+      <!-- Incremental-compilation bookkeeping, not outputs. -->
+      <ignoredWrites>maven-status/**</ignoredWrites>
     </mojo>
     <mojo goal="testCompile" prerequisitePhase="process-test-resources" stamping="carry">
       <inputs>
@@ -61,6 +63,8 @@
         compileSourceRoots, testPath,
         showCompilationChanges, skipMultiThreadWarning, compilerReuseStrategy, verbose, staleMillis
       </ignoredParameters>
+      <!-- Incremental-compilation bookkeeping, not outputs. -->
+      <ignoredWrites>maven-status/**</ignoredWrites>
     </mojo>
   </plugin>
 
@@ -76,6 +80,7 @@
         <file parameter="outputDirectory" name="{finalName}{-classifier}.jar"/>
       </outputs>
       <ignoredParameters>classesDirectory, forceCreation</ignoredParameters>
+      <ignoredWrites>maven-archiver/**</ignoredWrites>
     </mojo>
     <mojo goal="test-jar" prerequisitePhase="prepare-package" stamping="carry">
       <inputs>
@@ -86,6 +91,7 @@
         <file parameter="outputDirectory" name="{finalName}{-classifier}.jar"/>
       </outputs>
       <ignoredParameters>testClassesDirectory, forceCreation</ignoredParameters>
+      <ignoredWrites>maven-archiver/**</ignoredWrites>
     </mojo>
   </plugin>
 
@@ -101,6 +107,7 @@
         <file parameter="outputDirectory" name="{finalName}{-classifier}.jar"/>
       </outputs>
       <ignoredParameters>forceCreation, defaultManifestFile</ignoredParameters>
+      <ignoredWrites>maven-archiver/**</ignoredWrites>
     </mojo>
   </plugin>
 
@@ -127,6 +134,8 @@
         printSummary, trimStackTrace, tempDir, debugForkedProcess, parallelMavenExecution,
         enableProcessChecker, forkedProcessExitTimeoutInSeconds, shutdown
       </ignoredParameters>
+      <!-- Forked-JVM booter files, normally deleted after the run. -->
+      <ignoredWrites>surefire/**</ignoredWrites>
     </mojo>
   </plugin>
 
@@ -154,6 +163,8 @@
         printSummary, trimStackTrace, tempDir, debugForkedProcess, parallelMavenExecution,
         enableProcessChecker, forkedProcessExitTimeoutInSeconds, shutdown
       </ignoredParameters>
+      <!-- Forked-JVM booter files, normally deleted after the run. -->
+      <ignoredWrites>surefire/**</ignoredWrites>
     </mojo>
     <!-- Only reads the summary written by integration-test; fails the build on failures. -->
     <mojo goal="verify">

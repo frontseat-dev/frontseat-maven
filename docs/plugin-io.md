@@ -56,6 +56,7 @@ declarations only need to cover what that hash can't see:
 | `<inputs>` | Things whose **content** matters. A parameter named here is hashed by content (and normally also listed in `ignoredParameters`, so its path doesn't count). |
 | `<outputs>` | Files the mojo produces. They're declared rather than diffed, because a mojo that finds its outputs up to date writes nothing. |
 | `<ignoredParameters>` | Parameters that can't change outputs: logging, process plumbing, and parameters already hashed by content. Maven objects (`project`, `session`, `mojoExecution`, …) are always ignored. |
+| `<ignoredWrites>` | Ant patterns, relative to the project build directory, for files the mojo writes that are bookkeeping rather than outputs (the compiler's `maven-status/**`, the jar plugin's `maven-archiver/**`). [Strict mode](design.md#strict-mode) reports every other write outside the declared outputs. |
 | `cacheable="false" reason="…"` | The mojo has effects that can't be captured: system properties, static state, the network, files outside the project. A reason is required. |
 | `stamping="exact\|carry"` | Whether the mojo may act on stamp values such as the project version (`exact`, default) or only copies them into outputs (`carry`). See [versioning](versioning.md). |
 | `prerequisitePhase` | When the goal is invoked directly (`mvn surefire:test`), this phase runs or is restored first. |

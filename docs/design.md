@@ -49,6 +49,31 @@ example. A before/after file diff would then store an empty entry. Instead, desc
 outputs by pattern (`outputDirectory/**/*.class`), or compute them (the files a resources execution
 copies).
 
+### Strict mode
+
+Declarations can be wrong or incomplete, and an incomplete entry restores an incomplete build. So
+every time a declared, cacheable mojo actually runs, the extension snapshots the module (size and
+mtime of every file, skipping `.git`, nested reactor modules and its own `target/mojo-io`) before and
+after. A file created, changed or deleted outside the declared outputs and the declaration's
+`<ignoredWrites>` is an **undeclared write**:
+
+- the execution is never stored;
+- `mojoio.strict=warn` (default) logs the files, `fail` fails the build, `off` skips the check.
+
+Running the check on the built-in declarations found exactly two kinds of bookkeeping (the compiler's
+`maven-status/**`, the jar plugin's `maven-archiver/**`), plus one file Maven 4 itself writes during
+whichever mojo runs first (`target/consumer-<n>.pom`), which is always exempt, like `.mvn/`. `StrictModeIT` runs a full `verify` with
+`-Dmojoio.strict=fail`.
+
+`mojoio.strict.cleanOutputs=true` additionally deletes declared outputs before such a run, so a
+leftover from an earlier build (the class of a deleted source) cannot end up in the entry. It's
+opt-in: some outputs are legitimately shared or appended to (several test runs writing one JaCoCo
+`destfile`).
+
+Limits: changes are detected by size and modification time, so a rewrite with identical size within
+the filesystem's timestamp resolution goes unnoticed. Writes outside the module directory aren't
+seen.
+
 ### Path normalization
 
 `@@BASEDIR@@` (the module), `@@ROOT@@` (the multi-module root) and `@@M2REPO@@` (the local repository)
@@ -111,15 +136,14 @@ invocations (`mvn test surefire:test`) are left alone. To turn this off, set
 ## Known limitations of the first slice
 
 - Stale outputs: if a source is deleted, a later miss can still store the stale `.class` the compiler
-  left behind. Strict mode will deal with this.
+  left behind, unless `-Dmojoio.strict.cleanOutputs=true`.
 - Toolchains are ignored. The key uses the JDK running Maven.
 - A remote cache would also need plugin dependencies like the JaCoCo agent jar to exist locally.
   Today that case is a miss, not a failure.
 
 ## Roadmap
 
-1. **Strict mode**: fail (or warn) on writes outside the declared outputs, by snapshotting `target/`
-   around each miss. Also clean declared outputs before a miss.
+1. ~~**Strict mode**~~: done, see [Strict mode](#strict-mode).
 2. **Remote cache**: an HTTP or REAPI-compatible CAS + action cache behind the same `LocalCache`
    API, with local as an L1 cache.
 3. **Graph export**: emit the per-module execution graph with inputs and outputs for any orchestrator (Nx, Bazel, Frontseat, …) via a neutral, versioned JSON format

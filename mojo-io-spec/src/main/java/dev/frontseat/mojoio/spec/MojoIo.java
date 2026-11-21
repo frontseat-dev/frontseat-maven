@@ -15,18 +15,22 @@ import java.util.Set;
  * @param inputs            declared inputs; parameters they cover are hashed by content
  * @param outputs           declared outputs
  * @param ignoredParameters parameters that cannot affect outputs (logging, process plumbing)
+ * @param ignoredWrites     Ant patterns, relative to the project build directory, for files the mojo
+ *                          writes that are bookkeeping rather than outputs (e.g. the compiler's
+ *                          {@code maven-status/**}); strict mode does not report them
  * @param stampingCarry     {@code stamping="carry"}: the mojo only copies stamp values (project version,
  *                          build numbers) into its outputs, so they are excluded from the key and
  *                          rewritten on restore; otherwise ({@code exact}) they stay in the key
  */
 public record MojoIo(String goal, boolean cacheable, String reason, String prerequisitePhase,
                      List<IoDeclaration> inputs, List<IoDeclaration> outputs, Set<String> ignoredParameters,
-                     boolean stampingCarry) {
+                     Set<String> ignoredWrites, boolean stampingCarry) {
 
     public MojoIo {
         inputs = List.copyOf(inputs);
         outputs = List.copyOf(outputs);
         ignoredParameters = Set.copyOf(ignoredParameters);
+        ignoredWrites = Set.copyOf(ignoredWrites);
         if (!cacheable && (reason == null || reason.isBlank())) {
             throw new PluginIoException("mojo '" + goal + "' is not cacheable but gives no reason");
         }

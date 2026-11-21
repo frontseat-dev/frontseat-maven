@@ -36,6 +36,10 @@
       <xs:element name="outputs" type="Outputs" minOccurs="0"/>
       <!-- Comma or whitespace separated parameters that cannot affect outputs. -->
       <xs:element name="ignoredParameters" type="xs:string" minOccurs="0"/>
+      <!-- Comma or whitespace separated Ant patterns, relative to the project build directory, for
+           files the mojo writes that are bookkeeping, not outputs (e.g. maven-status/**). Strict mode
+           reports any other write outside the declared outputs. -->
+      <xs:element name="ignoredWrites" type="xs:string" minOccurs="0"/>
     </xs:sequence>
     <xs:attribute name="goal" type="xs:string" use="required"/>
     <xs:attribute name="cacheable" type="xs:boolean" default="true"/>
