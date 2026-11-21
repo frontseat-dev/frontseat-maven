@@ -79,7 +79,9 @@ resolve its upstream module, and JaCoCo's agent isn't attached.
 
 What a build system (Nx, Bazel, Turborepo, a CI cache, …) needs, all in the graph:
 
-1. **Tasks.** Group a project's executions by `canonicalPhase`, which is the same on Maven 3 and 4. Executions sharing a `runTogether` value (a phase
+1. **Tasks.** Use each project's ready-made `tasks`. Each one groups executions by `runTogether`, else by
+   `canonicalPhase`, and lists its `dependsOn` task ids (see [Phase links](#phase-links) below). To build
+   tasks yourself, group by `canonicalPhase`, which is the same on Maven 3 and 4. Executions sharing a `runTogether` value (a phase
    with its `pre-`/`post-` or Maven 4 `before:`/`after:` hooks) **must** be one task. Hooks hold
    process-local state: a server started in `pre-integration-test` dies with that Maven process.
 2. **Task hash.** Combine:
@@ -87,8 +89,7 @@ What a build system (Nx, Bazel, Turborepo, a CI cache, …) needs, all in the gr
      plugin configuration, plugin version and dependencies, JDK, value inputs);
    - the `files` inputs;
    - `poms` and `externalDependencies`;
-   - the hashes of the `dependsOn` projects' tasks (that's the classpath);
-   - the previous task of the same project.
+   - the hashes of the tasks in the task's `dependsOn`, which also cover the classpath.
    In Nx, put the fingerprints into the task's options, which Nx hashes.
 3. **Cache.** Store each member's `outputs` and its `stateFile`. An output with `"observed": true` (tests,
    agents) is known only after the run: store the files listed as `output` records in the state file.
@@ -107,6 +108,38 @@ byte for byte and can't rewrite the version inside them.
 (`ReferenceBuildSystem`) and mojo-io's own cache switched off. A fresh checkout is restored entirely from
 the build system's cache, and editing one test re-runs exactly that project's `test-compile` and `test`.
 `HookBracketsIT` shows that splitting a hook bracket breaks the integration tests.
+
+### Phase links
+
+Maven 4 defines the lifecycle as a tree of phases with **links**. A phase waits for phases of the same
+project, of its dependencies (in a scope) or of its children. The graph's `lifecycle` section carries
+that model. It's read from Maven 4 at run time; on Maven 3 a built-in copy of the Maven 4 default is
+used, so the graph is the same on both versions.
+
+The default links, from 4.0.0-rc-7:
+
+| Phase | Waits for |
+|---|---|
+| `compile` | own `sources`; **dependencies' (compile scope) `ready`** |
+| `ready` | own `compile` and `resources` |
+| `package` | own `ready`; **dependencies' (runtime scope) `package`** |
+| `test-compile` | own `test-sources` and `ready`; dependencies' (test-only) `ready` |
+| `test` | own `test-compile` and `test-resources`; **dependencies' (test scope) `ready`** |
+| `install`, `deploy` | own `package` |
+
+Each task's `dependsOn` has two parts:
+- the previous task of its project;
+- for every dependencies-link of its `lifecyclePhase`, the last task of each matching reactor dependency
+  that the linked phase covers.
+
+So `app:compile` and `app:test` depend on `lib-core:compile` ("ready"), not on `lib-core:test` or
+`lib-core:package`. In `ExternalBuildSystemIT`, changing a `lib-core` test re-runs exactly
+`lib-core:test-compile` and `lib-core:test`; every `app` task stays a hit, and with project-level
+edges they would all have re-run.
+
+Note: in rc-7, `integration-test` has no link to `package`, and its concurrent builder misorders
+integration tests accordingly. Within a project, tasks stay chained in plan order, which keeps the
+Maven 3 order.
 
 ### Granularity
 

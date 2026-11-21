@@ -109,6 +109,17 @@ cache entries.
   - a classpath that contains the mojo's own output.
   See [design notes](design.md).
 
+## Feedback on Maven 4's phase links (4.0.0-rc-7)
+
+The link model (`compile` waits for the dependencies' `ready`, `package` for their `package`, …) is
+exactly what monorepo tools need. mojo-io exports it as task dependencies, and it measurably reduces
+invalidation (see `docs/task-graph.md#phase-links`). Two gaps showed up while testing:
+
+- `integration-test` (and with it `pre-/post-integration-test`) has no link to `package`. The concurrent
+  builder runs integration tests and `failsafe:verify` before packaging, and builds no jar at all for
+  Maven 3-style bindings.
+- Phases bound directly to `verify` (`jacoco:report`, `failsafe:verify`) run before the tests.
+
 ## Suggested path
 
 1. Publish the `plugin-io.xml` format, and ship declarations in a few plugins (compiler, resources,
