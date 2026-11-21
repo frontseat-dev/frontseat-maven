@@ -41,12 +41,15 @@ public class TaskGraphCollector {
 
     private final DescriptorRegistry registry;
     private final RuntimeInformation runtime;
+    private final DependencyResolution dependencies;
     private final Map<MavenSession, Map<String, Object>> graphs = new java.util.WeakHashMap<>();
 
     @Inject
-    public TaskGraphCollector(DescriptorRegistry registry, RuntimeInformation runtime) {
+    public TaskGraphCollector(DescriptorRegistry registry, RuntimeInformation runtime,
+                              DependencyResolution dependencies) {
         this.registry = registry;
         this.runtime = runtime;
+        this.dependencies = dependencies;
     }
 
     synchronized void add(MavenSession session, MavenProject project, List<MojoExecution> executions) {
@@ -74,16 +77,45 @@ public class TaskGraphCollector {
             poms.add(path(normalizer, pom));
         }
         p.put("poms", poms);
+        p.put("externalDependencies", dependencies.externalDependencies(project, session));
 
+        // Phases that have hook phases bound in this project: Maven 3's pre-/post- brackets and
+        // Maven 4's before:/after: hooks. A hook and its phase share process-local state (a started
+        // server, a reserved port), so they must run in one Maven invocation.
+        java.util.Set<String> hooked = new java.util.HashSet<>();
+        for (MojoExecution m : executions) {
+            String phase = m.getLifecyclePhase();
+            if (phase != null && !hookBase(phase).equals(phase)) {
+                hooked.add(hookBase(phase));
+            }
+        }
         List<Object> list = new ArrayList<>();
         for (MojoExecution m : executions) {
-            list.add(execution(session, project, m, normalizer));
+            Map<String, Object> e = execution(session, project, m, normalizer);
+            String phase = m.getLifecyclePhase();
+            e.put("runTogether", phase != null && hooked.contains(hookBase(phase)) ? hookBase(phase) : null);
+            list.add(e);
         }
         p.put("executions", list);
         @SuppressWarnings("unchecked")
         List<Object> projects = (List<Object>) graph.get("projects");
         projects.add(p);
         LOG.info("[mojo-io] GRAPH {}: {} execution(s) described, none run", project.getArtifactId(), list.size());
+    }
+
+    /** Maven 3 brackets (clean, integration-test, site) and Maven 4 before:/after: hooks. */
+    static String hookBase(String phase) {
+        for (String prefix : List.of("before:", "after:")) {
+            if (phase.startsWith(prefix)) {
+                return phase.substring(prefix.length());
+            }
+        }
+        for (String base : List.of("clean", "integration-test", "site")) {
+            if (phase.equals("pre-" + base) || phase.equals("post-" + base)) {
+                return base;
+            }
+        }
+        return phase;
     }
 
     private Map<String, Object> execution(MavenSession session, MavenProject project, MojoExecution m,
@@ -95,6 +127,7 @@ public class TaskGraphCollector {
         e.put("goal", m.getGoal());
         e.put("executionId", m.getExecutionId());
         e.put("phase", m.getLifecyclePhase());
+        e.put("invocation", StateFiles.executionId(m)); // groupId:artifactId:version:goal@executionId, runnable as-is
         Optional<MojoCacheDescriptor> descriptor = registry.find(m, session);
         e.put("declaredBy", descriptor.map(MojoCacheDescriptor::source).orElse(null));
         e.put("stamping", descriptor.map(d -> d.stampingCarry() ? "carry" : "exact").orElse("exact"));
@@ -102,6 +135,7 @@ public class TaskGraphCollector {
         List<Object> inputs = new ArrayList<>();
         List<Object> outputs = new ArrayList<>();
         String reason = null;
+        String fingerprint = null;
         if (descriptor.isEmpty()) {
             reason = "no plugin-io declaration";
         } else if (!descriptor.get().cacheable()) {
@@ -113,6 +147,7 @@ public class TaskGraphCollector {
         } else {
             ExecutionContext ctx = new ExecutionContext(session, project, m, normalizer, true);
             try {
+                fingerprint = CacheKeyCalculator.fingerprint(ctx, descriptor.get());
                 for (InputSpec spec : descriptor.get().inputs()) {
                     for (ResolvedInput in : spec.resolve(ctx)) {
                         inputs.add(input(in, normalizer));
@@ -130,6 +165,7 @@ public class TaskGraphCollector {
             }
         }
         e.put("cacheable", reason == null);
+        e.put("fingerprint", reason == null ? fingerprint : null);
         e.put("reason", reason);
         e.put("inputs", inputs);
         e.put("outputs", outputs);
