@@ -31,8 +31,10 @@ public final class MojoCacheDescriptor {
     private final String prerequisitePhase;
     private final String source;
     private final boolean stampingCarry;
+    private final List<String> ignoredWrites;
 
     private MojoCacheDescriptor(Builder b) {
+        this.ignoredWrites = List.copyOf(b.ignoredWrites);
         this.source = b.source;
         this.stampingCarry = b.stampingCarry;
         this.pluginKey = b.pluginKey;
@@ -86,6 +88,11 @@ public final class MojoCacheDescriptor {
         return stampingCarry;
     }
 
+    /** Ant patterns, relative to the build directory, of bookkeeping writes strict mode does not report. */
+    public List<String> ignoredWrites() {
+        return ignoredWrites;
+    }
+
     /** Where this descriptor came from (built-in, plugin, project file); shown in key manifests. */
     public String source() {
         return source;
@@ -106,6 +113,7 @@ public final class MojoCacheDescriptor {
         private String prerequisitePhase;
         private String source = "code";
         private boolean stampingCarry;
+        private final List<String> ignoredWrites = new ArrayList<>();
 
         private Builder(String pluginKey, String goal) {
             this.pluginKey = pluginKey;
@@ -128,6 +136,11 @@ public final class MojoCacheDescriptor {
          */
         public Builder ignore(String... parameters) {
             ignored.addAll(List.of(parameters));
+            return this;
+        }
+
+        public Builder ignoreWrites(java.util.Collection<String> patterns) {
+            ignoredWrites.addAll(patterns);
             return this;
         }
 

@@ -146,6 +146,15 @@ public class MojoIoExecutionStrategy implements MojosExecutionStrategy {
             }
         }
 
+        boolean strict = config.strict() != MojoIoConfig.Strict.OFF && descriptor.isPresent()
+                && structuralReason(m, descriptor.get()) == null;
+        WriteSnapshot snapshot = null;
+        if (strict) {
+            if (config.cleanOutputs()) {
+                cleanDeclaredOutputs(ctx, descriptor.get(), label);
+            }
+            snapshot = WriteSnapshot.take(session, project);
+        }
         ProjectState before = ProjectState.capture(project);
         runner.run(m);
         List<CacheEntry.StateRecord> state = null;
@@ -158,8 +167,68 @@ public class MojoIoExecutionStrategy implements MojosExecutionStrategy {
         if (config.state()) {
             StateFiles.record(project, m, state == null ? List.of() : state, incomplete);
         }
+        String undeclared = strict ? checkWrites(m, ctx, descriptor.get(), snapshot, config, label) : null;
         if (key != null) {
-            store(m, ctx, normalizer.stamps(), cache, config, descriptor.get(), key, state, incomplete, label);
+            store(m, ctx, normalizer.stamps(), cache, config, descriptor.get(), key, state,
+                    incomplete != null ? incomplete : undeclared, label);
+        }
+    }
+
+    /**
+     * Strict mode: files the mojo wrote outside its declared outputs mean a cache entry would be
+     * incomplete. Returns a reason not to store (or {@code null}); in {@code fail} mode, fails the build.
+     */
+    private String checkWrites(MojoExecution m, ExecutionContext ctx, MojoCacheDescriptor descriptor,
+                               WriteSnapshot snapshot, MojoIoConfig config, String label)
+            throws LifecycleExecutionException {
+        List<String> undeclared;
+        try {
+            List<ResolvedOutput> outputs = new ArrayList<>();
+            for (OutputSpec spec : descriptor.outputs()) {
+                outputs.addAll(spec.resolve(ctx));
+            }
+            WriteSnapshot after = WriteSnapshot.take(ctx.session(), ctx.project());
+            Path buildDirectory = Path.of(ctx.project().getBuild().getDirectory()).toAbsolutePath().normalize();
+            undeclared = WriteSnapshot.undeclared(snapshot.changedSince(after), outputs, buildDirectory,
+                    descriptor.ignoredWrites(), snapshot.basedir());
+        } catch (NotCacheableException | RuntimeException e) {
+            LOG.debug(PREFIX + "cannot check writes of {}", label, e);
+            return null;
+        }
+        if (undeclared.isEmpty()) {
+            return null;
+        }
+        String files = (undeclared.size() > 10 ? undeclared.subList(0, 10) + " and " + (undeclared.size() - 10)
+                + " more" : undeclared.toString());
+        String message = label + " wrote " + undeclared.size() + " file(s) outside its declared outputs ("
+                + descriptor.source() + "): " + files;
+        if (config.strict() == MojoIoConfig.Strict.FAIL) {
+            throw new LifecycleExecutionException("[mojo-io] UNDECLARED " + message
+                    + ". Fix the plugin-io declaration, or run with -Dmojoio.strict=warn.", m, ctx.project());
+        }
+        LOG.warn(PREFIX + "UNDECLARED {}", message);
+        return "undeclared writes";
+    }
+
+    /** Strict mode with cleanOutputs: no leftover from an earlier build can end up in a new entry. */
+    private void cleanDeclaredOutputs(ExecutionContext ctx, MojoCacheDescriptor descriptor, String label) {
+        int deleted = 0;
+        try {
+            for (OutputSpec spec : descriptor.outputs()) {
+                for (ResolvedOutput output : spec.resolve(ctx)) {
+                    for (Path f : output.existingFiles()) {
+                        if (f.toAbsolutePath().normalize().startsWith(ctx.basedir())) {
+                            java.nio.file.Files.deleteIfExists(f);
+                            deleted++;
+                        }
+                    }
+                }
+            }
+        } catch (NotCacheableException | java.io.IOException | RuntimeException e) {
+            LOG.debug(PREFIX + "cannot clean outputs of {}", label, e);
+        }
+        if (deleted > 0) {
+            LOG.debug(PREFIX + "cleaned {} declared output(s) of {}", deleted, label);
         }
     }
 

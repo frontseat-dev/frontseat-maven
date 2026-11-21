@@ -31,6 +31,7 @@ class PluginIoReaderTest {
                   </outputs>
                   <ignoredParameters>verbose, quiet
                     logLevel</ignoredParameters>
+                  <ignoredWrites>gen-status/**, *.lock</ignoredWrites>
                 </mojo>
                 <mojo goal="publish" cacheable="false" reason="talks to a server"/>
               </plugin>
@@ -50,6 +51,7 @@ class PluginIoReaderTest {
         assertEquals("**/*.java", generate.outputs().get(0).required("includes"));
         assertEquals(Set.of("verbose", "quiet", "logLevel"), generate.ignoredParameters());
         assertTrue(generate.stampingCarry());
+        assertEquals(Set.of("gen-status/**", "*.lock"), generate.ignoredWrites());
 
         MojoIo publish = plugin.mojo("publish").orElseThrow();
         assertFalse(publish.cacheable());

@@ -15,7 +15,8 @@ final class PluginIoMapper {
     static MojoCacheDescriptor toDescriptor(String pluginKey, MojoIo io, String source) {
         String[] ga = pluginKey.split(":", 2);
         MojoCacheDescriptor.Builder b = MojoCacheDescriptor.forGoal(ga[0], ga[1], io.goal()).source(source)
-                .stampingCarry(io.stampingCarry());
+                .stampingCarry(io.stampingCarry())
+                .ignoreWrites(io.ignoredWrites());
         if (!io.cacheable()) {
             return b.notCacheable(io.reason()).build();
         }

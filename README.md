@@ -158,6 +158,8 @@ live service, drop a file in `.mvn/plugin-io/`:
 | `mojoio.stamp.properties` | unset | Extra stamp values besides `project.version`, e.g. `buildNumber,git.commit.id` ([versioning](docs/versioning.md)). |
 | `mojoio.cache.dir` | `~/.m2/mojo-io-cache` | Local cache location. |
 | `mojoio.cache.read` / `mojoio.cache.write` | `true` | E.g. `write=false` for a read-only CI consumer. |
+| `mojoio.strict` | `warn` | Strict mode: report files a declared mojo writes outside its declared outputs. Such executions are never cached; `fail` fails the build (use it in CI to enforce declarations); `off` disables the check. |
+| `mojoio.strict.cleanOutputs` | `false` | Delete declared outputs before a declared mojo runs, so leftovers (e.g. classes of deleted sources) never reach a cache entry. Opt-in, because some outputs are shared or appended to (JaCoCo's `destfile`). |
 | `mojoio.only` | unset | Comma-separated project ids. Other reactor projects replay their state but run no mojos: `-pl app -am -Dmojoio.only=app <invocation>` runs one task of `app` against its upstream modules' restored outputs. |
 | `mojoio.prerequisites` | `true` | Expand directly-invoked goals with their lifecycle prerequisites. |
 
