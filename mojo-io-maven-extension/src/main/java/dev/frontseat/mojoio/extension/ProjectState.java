@@ -31,6 +31,15 @@ final class ProjectState {
     static final String PROPERTY_REMOVED = "propertyRemoved";
     static final String ARTIFACT_FILE = "artifactFile";
     static final String ATTACHED_ARTIFACT = "attachedArtifact";
+    static final String SYSTEM_PROPERTY = "systemProperty";
+    static final String SYSTEM_PROPERTY_REMOVED = "systemPropertyRemoved";
+    /** Not a project change: a file the execution wrote that an observed output covers (see Outputs#observed). */
+    static final String OUTPUT = "output";
+
+    /** JVM and Maven runtime properties: they change for reasons unrelated to the mojo. */
+    private static final java.util.List<String> JVM_PREFIXES = java.util.List.of(
+            "java.", "jdk.", "sun.", "os.", "user.", "file.", "line.", "path.", "awt.", "javax.", "jna.",
+            "maven.", "classworlds.", "library.", "native.", "stdout.", "stderr.", "socksProxy", "http.", "https.");
 
     private final List<String> compileSourceRoots;
     private final List<String> testCompileSourceRoots;
@@ -38,6 +47,7 @@ final class ProjectState {
     private final List<String> testResources;
     private final Map<String, String> properties;
     private final String artifactFile;
+    private final Map<String, String> systemProperties;
     /** type:classifier -> file, in attachment order. */
     private final Map<String, String> attachedArtifacts;
 
@@ -50,6 +60,13 @@ final class ProjectState {
         project.getProperties().forEach((k, v) -> properties.put(String.valueOf(k), String.valueOf(v)));
         File file = project.getArtifact() == null ? null : project.getArtifact().getFile();
         artifactFile = file == null ? null : file.getAbsolutePath();
+        systemProperties = new TreeMap<>();
+        System.getProperties().forEach((k, v) -> {
+            String name = String.valueOf(k);
+            if (JVM_PREFIXES.stream().noneMatch(name::startsWith)) {
+                systemProperties.put(name, String.valueOf(v));
+            }
+        });
         attachedArtifacts = new LinkedHashMap<>();
         for (Artifact a : project.getAttachedArtifacts()) {
             attachedArtifacts.put(attachmentId(a.getType(), a.getClassifier()),
@@ -89,6 +106,16 @@ final class ProjectState {
         if (!Objects.equals(artifactFile, after.artifactFile)) {
             records.add(new StateRecord(ARTIFACT_FILE, "", n.normalize(after.artifactFile)));
         }
+        after.systemProperties.forEach((k, v) -> {
+            if (!Objects.equals(systemProperties.get(k), v)) {
+                records.add(new StateRecord(SYSTEM_PROPERTY, k, n.normalize(v)));
+            }
+        });
+        for (String k : systemProperties.keySet()) {
+            if (!after.systemProperties.containsKey(k)) {
+                records.add(new StateRecord(SYSTEM_PROPERTY_REMOVED, k, null));
+            }
+        }
         for (Map.Entry<String, String> e : after.attachedArtifacts.entrySet()) {
             if (!attachedArtifacts.containsKey(e.getKey())) {
                 records.add(new StateRecord(ATTACHED_ARTIFACT, e.getKey(), n.normalize(e.getValue())));
@@ -120,6 +147,9 @@ final class ProjectState {
                 case PROPERTY_REMOVED -> project.getProperties().remove(r.name());
                 case ARTIFACT_FILE -> project.getArtifact().setFile(value == null ? null : new File(value));
                 case ATTACHED_ARTIFACT -> attach(project, r.name(), value, helper);
+                case SYSTEM_PROPERTY -> System.setProperty(r.name(), value);
+                case SYSTEM_PROPERTY_REMOVED -> System.clearProperty(r.name());
+                case OUTPUT -> { } // informational, for external caches
                 default -> throw new IllegalStateException("Unknown state record kind " + r.kind());
             }
         }
