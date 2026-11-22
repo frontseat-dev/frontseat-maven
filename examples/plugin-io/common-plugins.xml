@@ -1,0 +1,173 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Declarations for plugins that many builds bind in every module (for example through a company or
+  Apache parent pom). Copy into a project's .mvn/plugin-io/ to cache them. Verified on Apache Commons
+  Numbers (docs/real-projects.md).
+
+  Each of them is cheap. They matter for build systems that cache whole tasks (Nx, a remote execution
+  grid): one undeclared mojo makes its whole task uncacheable.
+
+  Not built in, because each covers the usual configurations only. Read the note on a mojo before
+  relying on it, and check its key manifest (target/mojo-io/<plugin>-<goal>-<execution>.key.txt).
+-->
+<plugin-io xmlns="urn:mojo-io:plugin-io:1.0">
+
+  <!-- Rules on the project (versions, plugins), on its dependencies (convergence, banned dependencies:
+       the models of every project of the build and the resolved classpath), the Maven version and the
+       JDK (always in the key). Not covered: rules that read the environment, the OS or files
+       (requireEnvironmentVariable, requireOS, requireFilesExist, …), and changed SNAPSHOT dependencies
+       from outside the build. -->
+  <plugin groupId="org.apache.maven.plugins" artifactId="maven-enforcer-plugin">
+    <mojo goal="enforce">
+      <inputs>
+        <projectModel/>
+        <reactorModels/>
+        <testClasspath ownOutputs="false"/>
+        <mavenVersion/>
+      </inputs>
+    </mojo>
+  </plugin>
+
+  <!-- Scans every file of the project; the excludes are configuration. Not covered: an excludes file
+       outside the project, and excludeSubProjects=false (then it also scans the nested modules). -->
+  <plugin groupId="org.apache.rat" artifactId="apache-rat-plugin">
+    <mojo goal="check">
+      <inputs>
+        <projectFiles/>
+      </inputs>
+      <outputs>
+        <observed/>
+      </outputs>
+    </mojo>
+  </plugin>
+
+  <!-- Checks the plugins of the build plan for known reproducibility problems. The plan depends on the
+       goals the build was started with, so those are an input: a pass under "verify" is not reused
+       under "deploy". When a build system runs it as a task of its own, the plan it checks is that task. -->
+  <plugin groupId="org.apache.maven.plugins" artifactId="maven-artifact-plugin">
+    <mojo goal="check-buildplan">
+      <inputs>
+        <projectModel/>
+        <sessionGoals/>
+      </inputs>
+      <outputs>
+        <observed/>
+      </outputs>
+    </mojo>
+  </plugin>
+
+  <!-- Generates resources (LICENSE, NOTICE, DEPENDENCIES) from bundles named in the configuration and
+       from the project and its dependencies. An execution that adds a resource directory to the project
+       is not stored (that change cannot be replayed yet), so it simply runs. Not covered: the current
+       year in generated notices, and a resource bundle built in the same reactor. -->
+  <plugin groupId="org.apache.maven.plugins" artifactId="maven-remote-resources-plugin">
+    <mojo goal="process">
+      <inputs>
+        <projectModel/>
+        <testClasspath ownOutputs="false"/>
+        <files parameter="appendedResourcesDirectory"/>
+      </inputs>
+      <outputs>
+        <observed/>
+      </outputs>
+    </mojo>
+  </plugin>
+
+  <!-- The OSGi manifest: computed from the classes, the classpath and the instructions (configuration). -->
+  <plugin groupId="org.apache.felix" artifactId="maven-bundle-plugin">
+    <mojo goal="manifest">
+      <inputs>
+        <files expression="${project.build.outputDirectory}"/>
+        <testClasspath ownOutputs="false"/>
+        <projectModel/>
+      </inputs>
+      <outputs>
+        <observed/>
+      </outputs>
+    </mojo>
+  </plugin>
+
+  <!-- Attaches the site descriptor of pom projects. -->
+  <plugin groupId="org.apache.maven.plugins" artifactId="maven-site-plugin">
+    <mojo goal="attach-descriptor">
+      <inputs>
+        <files parameter="siteDirectory"/>
+        <projectModel/>
+      </inputs>
+      <outputs>
+        <observed/>
+      </outputs>
+    </mojo>
+  </plugin>
+
+  <!-- Validates src/changes/changes.xml. -->
+  <plugin groupId="org.apache.maven.plugins" artifactId="maven-changes-plugin">
+    <mojo goal="changes-validate">
+      <inputs>
+        <files parameter="xmlPath"/>
+      </inputs>
+    </mojo>
+  </plugin>
+
+  <!-- Compares the built jar with a released version named in the configuration. Not covered: no old
+       version configured (then it is the latest release found in the repository), or an old version
+       given as a file. -->
+  <plugin groupId="com.github.siom79.japicmp" artifactId="japicmp-maven-plugin">
+    <mojo goal="cmp">
+      <inputs>
+        <files expression="${project.artifact.file}"/>
+        <testClasspath ownOutputs="false"/>
+      </inputs>
+      <outputs>
+        <observed/>
+      </outputs>
+    </mojo>
+  </plugin>
+
+  <!-- An aggregator: at the execution root it describes every project of the build and their
+       dependencies; in the other projects it does nothing. Needs network access (it refuses to run
+       offline). When a build system runs one project per invocation, "the build" is that project and
+       what it depends on, so the aggregate differs from a full build's. -->
+  <plugin groupId="org.cyclonedx" artifactId="cyclonedx-maven-plugin">
+    <mojo goal="makeAggregateBom">
+      <inputs>
+        <reactorModels/>
+        <testClasspath ownOutputs="false"/>
+      </inputs>
+      <outputs>
+        <observed/>
+      </outputs>
+    </mojo>
+  </plugin>
+
+  <!-- Describes the project, its files, its dependencies and the packaged artifact. -->
+  <plugin groupId="org.spdx" artifactId="spdx-maven-plugin">
+    <mojo goal="createSPDX">
+      <inputs>
+        <projectModel/>
+        <projectFiles/>
+        <testClasspath ownOutputs="false"/>
+        <files expression="${project.artifact.file}"/>
+      </inputs>
+      <outputs>
+        <observed/>
+      </outputs>
+    </mojo>
+  </plugin>
+
+  <!-- Rewrites the project's jar in place, adding a module descriptor computed from the jar, the
+       configuration and the dependencies. Not covered: a module-info source file named inside the
+       configuration (moduleInfoFile); declare it as an extra <files> input in the project. The jar as jar:jar left it is the input; the rewritten jar is
+       the (observed) output. -->
+  <plugin groupId="org.moditect" artifactId="moditect-maven-plugin">
+    <mojo goal="add-module-info">
+      <inputs>
+        <files expression="${project.artifact.file}"/>
+        <testClasspath ownOutputs="false"/>
+      </inputs>
+      <outputs>
+        <observed/>
+      </outputs>
+    </mojo>
+  </plugin>
+</plugin-io>

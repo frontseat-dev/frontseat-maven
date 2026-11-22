@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Project-specific declarations for builds that inherit org.apache.commons:commons-parent. An antrun
+  execution can do anything, so it can only be declared for one known script: this one is the parent's
+  "javadoc.resources" execution, which copies LICENSE and NOTICE files into target/apidocs/META-INF.
+  If a project adds other antrun executions, this declaration is wrong for them.
+-->
+<plugin-io xmlns="urn:mojo-io:plugin-io:1.0">
+  <plugin groupId="org.apache.maven.plugins" artifactId="maven-antrun-plugin">
+    <mojo goal="run">
+      <inputs>
+        <files expression="${basedir}/LICENSE.txt"/>
+        <files expression="${basedir}/NOTICE.txt"/>
+        <files expression="${basedir}/LICENSE"/>
+        <files expression="${basedir}/NOTICE"/>
+      </inputs>
+      <outputs>
+        <observed/>
+      </outputs>
+    </mojo>
+  </plugin>
+</plugin-io>
