@@ -45,6 +45,7 @@ public class DescriptorRegistry {
     private static final Logger LOG = LoggerFactory.getLogger(DescriptorRegistry.class);
 
     private final Map<String, MojoCacheDescriptor> builtin;
+    private final List<PluginIo> builtinPlugins;
     /** Keyed by root and a stamp of the files, so a long-lived daemon (mvnd) sees edited overrides. */
     private final Map<String, Map<String, MojoCacheDescriptor>> projectDeclarations = new ConcurrentHashMap<>();
     private final Map<String, Map<String, MojoCacheDescriptor>> pluginDeclarations = new ConcurrentHashMap<>();
@@ -54,7 +55,8 @@ public class DescriptorRegistry {
         if (url == null) {
             throw new IllegalStateException("Missing " + BUILTIN_RESOURCE);
         }
-        builtin = index(PluginIoReader.read(url), "built-in");
+        builtinPlugins = PluginIoReader.read(url);
+        builtin = index(builtinPlugins, "built-in");
     }
 
     public Optional<MojoCacheDescriptor> find(MojoExecution execution, MavenSession session) {
@@ -67,6 +69,35 @@ public class DescriptorRegistry {
             d = builtin.get(goalKey);
         }
         return Optional.ofNullable(d);
+    }
+
+    /**
+     * The {@code projectLoad} patterns declared for the plugin {@code groupId:artifactId} (a build
+     * extension), by the project's {@code .mvn/plugin-io/} and the built-in declarations.
+     */
+    public List<String> projectLoad(String pluginKey, MavenSession session) {
+        return projectLoad(pluginKey, root(session));
+    }
+
+    List<String> projectLoad(String pluginKey, Path root) {
+        java.util.Set<String> patterns = new java.util.LinkedHashSet<>();
+        Path dir = root == null ? null : root.resolve(PROJECT_DIRECTORY);
+        List<PluginIo> plugins = new java.util.ArrayList<>(builtinPlugins);
+        if (dir != null && Files.isDirectory(dir)) {
+            try (Stream<Path> files = Files.list(dir)) {
+                for (Path f : files.filter(p -> p.toString().endsWith(".xml")).sorted().toList()) {
+                    plugins.addAll(PluginIoReader.read(f));
+                }
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
+        }
+        for (PluginIo p : plugins) {
+            if (pluginKey.equals(p.key())) {
+                patterns.addAll(p.projectLoad());
+            }
+        }
+        return List.copyOf(patterns);
     }
 
     Map<String, MojoCacheDescriptor> forProject(Path root) {

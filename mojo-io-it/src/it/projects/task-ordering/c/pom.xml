@@ -19,4 +19,24 @@
     </dependency>
   </dependencies>
 
+  <build>
+    <plugins>
+      <!-- Names tools, a module of this build, only in configuration: Maven's -am doesn't follow it. -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-dependency-plugin</artifactId>
+        <version>3.8.1</version>
+        <configuration>
+          <artifactItems>
+            <artifactItem>
+              <groupId>com.example.samples</groupId>
+              <artifactId>tools</artifactId>
+              <version>${project.version}</version>
+            </artifactItem>
+          </artifactItems>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+
 </project>

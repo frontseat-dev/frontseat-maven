@@ -204,6 +204,15 @@ function targetsFor(project, graph, names, options) {
         }
       }
     }
+    // What build extensions read while Maven loads this project and the other reactor projects the
+    // command selects (Tycho: manifests, feature.xml, the target definition).
+    for (const f of project.loadFiles || []) inputs.push(nxPath(f));
+    for (const ref of project.reactorReferences || []) {
+      const other = graph.projects.find((p) => p.id === ref);
+      if (!other) continue;
+      const otherRoot = other.path === '' ? '{workspaceRoot}' : `{workspaceRoot}/${other.path}`;
+      for (const f of other.loadFiles || []) inputs.push(f.replace('{projectRoot}', otherRoot));
+    }
     // transitive: Maven classpaths are transitive, so a change two modules up must change this hash too.
     inputs.push({ dependentTasksOutputFiles: '**/*', transitive: true });
 
@@ -238,7 +247,10 @@ function targetsFor(project, graph, names, options) {
       return owner === project.id ? name : { projects: [names[owner]], target: name };
     });
 
-    const invocation = [maven, ...baseArgs(maven), '-B', '--no-transfer-progress', '-pl', project.id, '-am',
+    // The reactor projects the task needs that Maven's "-am" can miss (named in configuration, or
+    // added as dependencies while loading, as Eclipse Tycho does).
+    const projectList = [project.id, ...(project.reactorReferences || [])].join(',');
+    const invocation = [maven, ...baseArgs(maven), '-B', '--no-transfer-progress', '-pl', projectList, '-am',
       `-Dmojoio.only=${project.id}`, ...(options && options.innerCache ? [] : ['-Dmojoio.cache.enabled=false']),
       '-Dmojoio.prerequisites=false',
       // Not read by Maven: makes Nx's hash cover what it cannot hash itself (evaluated configuration,

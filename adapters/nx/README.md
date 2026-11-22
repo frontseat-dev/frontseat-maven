@@ -16,12 +16,15 @@ invocations. It's an *adapter*: nothing in mojo-io knows about Nx.
   `lib-core:compile` ("ready"), not on `lib-core:test` or `lib-core:package`.
 - **Running a target** runs exactly that task's mojos in one invocation, through mvnd when available
   (with `-Dmvnd.duplicateDaemonGracePeriod=3h`, so the daemons of parallel targets stay warm):
-  `-pl <id> -am -Dmojoio.only=<id> <groupId:artifactId:version:goal@execution>...`.
+  `-pl <id>,<reactorReferences> -am -Dmojoio.only=<id> <groupId:artifactId:version:goal@execution>...`
+  (reactor projects `-am` misses: named in configuration, or added while loading as Tycho does).
   - The extension replays the recorded state of everything else (artifact files, attached artifacts,
     generated source roots, JaCoCo's `argLine`).
   - So restored outputs are enough to continue.
 - **Cache inputs:**
   - the task's source files and POMs;
+  - the files build extensions read while loading the task's project and its reactor references
+    (`loadFiles`: Tycho's manifests, `feature.xml`, the target definition);
   - the outputs of the tasks it depends on, transitively (`dependentTasksOutputFiles`), which covers the
     classpath: Maven's classpaths are transitive, so a change two modules up changes the hash;
   - a `-Dmojoio.fingerprint=` argument in the command, covering what Nx can't hash itself: evaluated

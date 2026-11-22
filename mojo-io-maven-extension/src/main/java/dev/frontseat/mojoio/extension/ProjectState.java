@@ -12,6 +12,8 @@ import org.apache.maven.artifact.Artifact;
 import org.apache.maven.model.Resource;
 import org.apache.maven.project.MavenProject;
 import org.apache.maven.project.MavenProjectHelper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * The parts of {@link MavenProject} that mojos commonly mutate and that later mojos read. A snapshot
@@ -25,6 +27,8 @@ import org.apache.maven.project.MavenProjectHelper;
  */
 final class ProjectState {
 
+    private static final Logger LOG = LoggerFactory.getLogger(ProjectState.class);
+
     static final String COMPILE_SOURCE_ROOT = "compileSourceRoot";
     static final String TEST_COMPILE_SOURCE_ROOT = "testCompileSourceRoot";
     static final String PROPERTY = "property";
@@ -33,6 +37,12 @@ final class ProjectState {
     static final String ATTACHED_ARTIFACT = "attachedArtifact";
     static final String SYSTEM_PROPERTY = "systemProperty";
     static final String SYSTEM_PROPERTY_REMOVED = "systemPropertyRemoved";
+    /**
+     * A text value in the project context ({@code MavenProject#setContextValue}), or, named
+     * {@code @<class>#<key>}, in the context of the object of that class kept there: Eclipse Tycho's
+     * ReactorProject, where its mojos hand values to later ones (the Service-Component header).
+     */
+    static final String CONTEXT_VALUE = "contextValue";
     /** Not a project change: a file the execution wrote that an observed output covers (see Outputs#observed). */
     static final String OUTPUT = "output";
 
@@ -48,6 +58,10 @@ final class ProjectState {
     private final Map<String, String> properties;
     private final String artifactFile;
     private final Map<String, String> systemProperties;
+    /** Text values of the project context, and of the contexts of objects kept in it. */
+    private final Map<String, String> contextValues;
+    /** The other values, by identity: replay cannot recreate them. */
+    private final Map<String, Object> contextObjects;
     /** type:classifier -> file, in attachment order. */
     private final Map<String, String> attachedArtifacts;
 
@@ -65,6 +79,24 @@ final class ProjectState {
             String name = String.valueOf(k);
             if (JVM_PREFIXES.stream().noneMatch(name::startsWith)) {
                 systemProperties.put(name, String.valueOf(v));
+            }
+        });
+        contextValues = new TreeMap<>();
+        contextObjects = new TreeMap<>();
+        context(project).forEach((k, v) -> {
+            if (v instanceof String text) {
+                contextValues.put(k, text);
+            } else if (v != null) {
+                contextObjects.put(k, v);
+                // Named by class: Tycho's key holds an identity hash, different in every JVM.
+                String owner = "@" + v.getClass().getName() + "#";
+                context(v).forEach((nk, nv) -> {
+                    if (nv instanceof String text) {
+                        contextValues.put(owner + nk, text);
+                    } else if (nv != null) {
+                        contextObjects.put(owner + nk, nv);
+                    }
+                });
             }
         });
         attachedArtifacts = new LinkedHashMap<>();
@@ -107,6 +139,16 @@ final class ProjectState {
                 records.add(new StateRecord(PROPERTY_REMOVED, k, null));
             }
         }
+        after.contextValues.forEach((k, v) -> {
+            if (!Objects.equals(contextValues.get(k), v)) {
+                records.add(new StateRecord(CONTEXT_VALUE, k, n.normalize(v)));
+            }
+        });
+        after.contextObjects.forEach((k, v) -> {
+            if (contextObjects.get(k) != v) {
+                LOG.debug("[mojo-io] execution set context value {} ({}): not recorded", k, v.getClass().getName());
+            }
+        });
         if (!Objects.equals(artifactFile, after.artifactFile)) {
             records.add(new StateRecord(ARTIFACT_FILE, "", n.normalize(after.artifactFile)));
         }
@@ -153,6 +195,7 @@ final class ProjectState {
                 case ATTACHED_ARTIFACT -> attach(project, r.name(), value, helper);
                 case SYSTEM_PROPERTY -> System.setProperty(r.name(), value);
                 case SYSTEM_PROPERTY_REMOVED -> System.clearProperty(r.name());
+                case CONTEXT_VALUE -> setContextValue(project, r.name(), value);
                 case OUTPUT -> { } // informational, for external caches
                 default -> throw new IllegalStateException("Unknown state record kind " + r.kind());
             }
@@ -173,8 +216,74 @@ final class ProjectState {
                     attachmentId(a.getType(), a.getClassifier()).equals(r.name()));
             case SYSTEM_PROPERTY -> Objects.equals(System.getProperty(r.name()), value);
             case SYSTEM_PROPERTY_REMOVED -> System.getProperty(r.name()) == null;
+            case CONTEXT_VALUE -> Objects.equals(contextValue(project, r.name()), value);
             default -> false;
         };
+    }
+
+    /**
+     * The context of {@code owner} (a MavenProject, or an object kept in its context with one of its
+     * own): neither has an API to list it. Empty if there is no readable {@code context} map.
+     */
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> context(Object owner) {
+        for (Class<?> c = owner.getClass(); c != null && c != Object.class; c = c.getSuperclass()) {
+            java.lang.reflect.Field f;
+            try {
+                f = c.getDeclaredField("context");
+            } catch (NoSuchFieldException e) {
+                continue;
+            }
+            if (!Map.class.isAssignableFrom(f.getType())) {
+                return Map.of();
+            }
+            try {
+                f.setAccessible(true);
+                Map<String, Object> context = (Map<String, Object>) f.get(owner);
+                return context == null ? Map.of() : new LinkedHashMap<>(context);
+            } catch (ReflectiveOperationException | RuntimeException e) {
+                return Map.of();
+            }
+        }
+        return Map.of();
+    }
+
+    /** The object of class {@code className} in the project context, or {@code null}. */
+    private static Object contextOwner(MavenProject project, String className) {
+        for (Object v : context(project).values()) {
+            if (v != null && v.getClass().getName().equals(className)) {
+                return v;
+            }
+        }
+        return null;
+    }
+
+    private static Object contextValue(MavenProject project, String name) {
+        if (!name.startsWith("@")) {
+            return project.getContextValue(name);
+        }
+        int i = name.indexOf('#');
+        Object owner = contextOwner(project, name.substring(1, i));
+        return owner == null ? null : context(owner).get(name.substring(i + 1));
+    }
+
+    private static void setContextValue(MavenProject project, String name, String value) {
+        if (!name.startsWith("@")) {
+            project.setContextValue(name, value);
+            return;
+        }
+        int i = name.indexOf('#');
+        Object owner = contextOwner(project, name.substring(1, i));
+        if (owner == null) {
+            throw new IllegalStateException("cannot replay context value " + name + ": no "
+                    + name.substring(1, i) + " in the context of " + project.getId());
+        }
+        try {
+            owner.getClass().getMethod("setContextValue", String.class, Object.class)
+                    .invoke(owner, name.substring(i + 1), value);
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException("cannot replay context value " + name, e);
+        }
     }
 
     static String attachmentId(String type, String classifier) {

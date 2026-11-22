@@ -25,6 +25,21 @@ public final class Inputs {
     }
 
     /**
+     * {@code files} without the files under its paths that match {@code excludes} (Ant patterns
+     * relative to each path): what the mojo itself writes there, such as generated metadata among the
+     * classes it reads.
+     */
+    public static InputSpec excluding(InputSpec files, List<String> excludes) {
+        if (excludes.isEmpty()) {
+            return files;
+        }
+        return ctx -> files.resolve(ctx).stream()
+                .map(in -> new ResolvedInput(in.name(), in.kind(), in.paths(), in.includes(), excludes, in.value(),
+                        in.scope()))
+                .toList();
+    }
+
+    /**
      * A classpath parameter, compared by content in order. The mojo's own output directory is skipped:
      * Maven puts it on the classpath (javac's {@code compilePath} starts with {@code target/classes}),
      * which would make the key depend on the previous run's outputs.

@@ -9,6 +9,7 @@ import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import javax.xml.XMLConstants;
@@ -110,5 +111,42 @@ class DescriptorRegistryTest {
                 PluginIoReader.read(new java.io.ByteArrayInputStream(xml.getBytes(java.nio.charset.StandardCharsets.UTF_8)), "test"), "test");
         assertTrue(index.get("g:a:aggregate").reactorWide());
         assertFalse(index.get("g:a:single").reactorWide());
+    }
+
+    /** The declarations shipped as examples load, and satisfy the schema. */
+    @Test
+    void exampleDeclarationsAreSchemaValid() throws Exception {
+        Path examples = Path.of("../examples/plugin-io").toAbsolutePath().normalize();
+        javax.xml.validation.Validator validator = SchemaFactory.newInstance(XMLConstants.W3C_XML_SCHEMA_NS_URI)
+                .newSchema(PluginIoReader.class.getResource(PluginIoReader.SCHEMA_RESOURCE)).newValidator();
+        try (java.util.stream.Stream<Path> files = Files.list(examples)) {
+            for (Path f : files.filter(x -> x.toString().endsWith(".xml")).sorted().toList()) {
+                validator.validate(new StreamSource(f.toFile()));
+                DescriptorRegistry.index(PluginIoReader.read(f), f.toString()); // maps every declaration
+            }
+        }
+    }
+
+    @Test
+    void projectLoadPatternsComeFromDotMvnAndExcludesApplyToFiles(@TempDir Path root) throws Exception {
+        Path dir = Files.createDirectories(root.resolve(DescriptorRegistry.PROJECT_DIRECTORY));
+        Files.writeString(dir.resolve("ext.xml"), """
+                <plugin-io xmlns="urn:mojo-io:plugin-io:1.0">
+                  <plugin groupId="org.example" artifactId="ext-maven-plugin">
+                    <projectLoad>META-INF/MANIFEST.MF, *.target</projectLoad>
+                  </plugin>
+                  <plugin groupId="org.example" artifactId="gen-maven-plugin">
+                    <mojo goal="gen">
+                      <inputs>
+                        <files expression="${project.build.outputDirectory}" excludes="OSGI-INF/**"/>
+                      </inputs>
+                    </mojo>
+                  </plugin>
+                </plugin-io>
+                """);
+        DescriptorRegistry registry = new DescriptorRegistry();
+        assertEquals(List.of("META-INF/MANIFEST.MF", "*.target"), registry.projectLoad("org.example:ext-maven-plugin", root));
+        assertEquals(List.of(), registry.projectLoad("org.example:other-maven-plugin", root));
+        assertTrue(registry.forProject(root).get("org.example:gen-maven-plugin:gen").cacheable());
     }
 }

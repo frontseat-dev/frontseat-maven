@@ -193,7 +193,32 @@ resolved from p2 repositories, and its own plugins (`tycho-compiler`, `tycho-pac
 - **Still undeclared:** packaging and p2 publishing mojos (`package-plugin`, `package-feature`,
   `p2-metadata`, `assemble-repository`, `materialize-products`, …) and `build-qualifier`, which reads
   the clock. They're cheap next to compiling and testing, but a build system that caches whole tasks
-  can't cache a package stage of a Tycho project yet.
+  can't cache a package stage of a Tycho project yet. A bundle's compile and test tasks are cacheable,
+  including OSGi declarative services (`tycho-ds`) and PDE's automatic manifest (`tycho-bnd`).
+
+### Task by task, and on Buildbarn
+
+Every task of the demo also builds as its own Maven call (as Nx runs it), and on Buildbarn through
+the REAPI adapter, each action in its own sandbox. Outputs match plain Maven: the files that differ
+are the ones that differ between two plain builds too (p2 profile timestamps, archives repacked with
+new times, p2's record of the repositories it read). That took:
+
+- **Reactor references.** The target definition project is named only in the parent's
+  `target-platform-configuration`, and Tycho adds required bundles, features and units as
+  dependencies while loading projects, after Maven sorted the reactor. The graph lists both as
+  `reactorReferences` for `-pl`, with task edges (docs/task-graph.md).
+- **Files read while loading.** Tycho reads manifests, `feature.xml` and the target definition before
+  any mojo runs. `tycho.xml` lists them in a `projectLoad` element, exported as `loadFiles`.
+- **Source folders from `build.properties`.** Tycho sets them as compile source roots while the build
+  runs, so the graph, exported beforehand, would see Maven's default `src/main/java`: a REAPI action
+  compiled nothing, and Nx would not have hashed the sources. The compiler declarations hash the
+  project's own files instead.
+- **State in Tycho's context.** `tycho-ds` hands the `Service-Component` header to `package-plugin`
+  through Tycho's own project context. Text values there are now recorded and replayed
+  (docs/state-format.md).
+- **State deleted by a clean.** The demo binds `clean` to `validate`, after the qualifier was computed:
+  state files recorded earlier in the same build are written again.
+- **Absolute paths in outputs.** See the REAPI adapter's README.
 
 ## Reproducing it
 

@@ -72,6 +72,22 @@ forks `spotbugs:spotbugs`. Such a mojo is cached as one unit with its forked exe
 If a forked execution has no declaration (for example a forked lifecycle with undeclared mojos), the
 forking mojo isn't cached.
 
+### Files a build extension reads while projects load
+
+A plugin used as a build extension (`<extensions>true</extensions>`) can read project files before any
+mojo runs. Eclipse Tycho reads manifests, `feature.xml` and target definitions there. Name them, as
+Ant patterns relative to the project directory, in a `projectLoad` element of the plugin:
+
+```xml
+<plugin groupId="org.eclipse.tycho" artifactId="tycho-maven-plugin">
+  <projectLoad>META-INF/MANIFEST.MF, build.properties, feature.xml, *.target</projectLoad>
+</plugin>
+```
+
+The task graph lists the matching files of each project whose build has the plugin as `loadFiles`,
+for build systems that run tasks in a sandbox (docs/task-graph.md). Only project and built-in
+declarations are read for this, not declarations inside plugin jars.
+
 ### Checking a declaration
 
 [Strict mode](design.md#strict-mode) reports outputs a declaration misses. Nothing can report a missing
@@ -87,7 +103,7 @@ forking mojo isn't cached.
 
 | Kind | Attributes | Hashes |
 |---|---|---|
-| `files` | `parameter` or `expression` | Content of the files/trees a path or path-list parameter names, or that a Maven expression such as `${project.file}` evaluates to. |
+| `files` | `parameter` or `expression`, `excludes?` | Content of the files/trees a path or path-list parameter names, or that a Maven expression such as `${project.file}` evaluates to. `excludes`: Ant patterns, relative to each path, of files left out, such as what the mojo itself writes among the files it reads. |
 | `classpath` | `parameter`, `excludeParameter?` | An ordered classpath, by content not location. `excludeParameter` skips an entry, usually the mojo's own output directory. |
 | `testClasspath` | `ownOutputs?` | The project's test classpath, resolved for this input whatever the mojo asks Maven to resolve. For mojos that build it internally or read dependencies some other way. `ownOutputs="false"` leaves out the project's own classes and test-classes directories: for mojos that only need the dependencies, or run before those directories are built. |
 | `resources` | `parameter` or `expression` | A `List<Resource>`: settings plus selected files. With filtering, also project coordinates, project properties and user properties. |

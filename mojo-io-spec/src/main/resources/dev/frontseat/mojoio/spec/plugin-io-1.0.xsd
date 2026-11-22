@@ -23,7 +23,13 @@
 
   <xs:complexType name="Plugin">
     <xs:sequence>
-      <xs:element name="mojo" type="Mojo" maxOccurs="unbounded"/>
+      <!-- For a plugin that is a build extension: Ant patterns, relative to a project's directory, of the
+           files it reads while Maven loads the project, before any mojo runs (Eclipse Tycho reads
+           MANIFEST.MF, feature.xml, target definitions...). Applies to projects whose build has the
+           plugin. A build system that runs a task in a sandbox provides these files of the task's
+           project and of every reactor project the task loads. -->
+      <xs:element name="projectLoad" type="xs:string" minOccurs="0"/>
+      <xs:element name="mojo" type="Mojo" minOccurs="0" maxOccurs="unbounded"/>
     </xs:sequence>
     <!-- Optional inside the plugin's own jar (META-INF/maven/plugin-io.xml), required elsewhere. -->
     <xs:attribute name="groupId" type="xs:string"/>
@@ -69,6 +75,8 @@
         <xs:complexType>
           <xs:attribute name="parameter" type="xs:string"/>
           <xs:attribute name="expression" type="xs:string"/>
+          <!-- Ant patterns, relative to each path, of files not hashed (what the mojo writes there itself). -->
+          <xs:attribute name="excludes" type="xs:string"/>
         </xs:complexType>
       </xs:element>
       <!-- An ordered classpath; elements hashed by content, not location. -->
