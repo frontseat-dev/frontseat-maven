@@ -65,12 +65,33 @@ final class ConfigurationHasher {
         }
     }
 
+    private static final java.util.regex.Pattern LATE = java.util.regex.Pattern.compile("@\\{([^}]+)}");
+
+    /**
+     * Surefire/failsafe "late replacement": {@code @{argLine}} is substituted with the project property at
+     * run time, after other mojos (e.g. jacoco:prepare-agent) set it. The key must see the value the mojo
+     * will see, not the literal placeholder.
+     */
+    static String lateReplace(ExecutionContext ctx, String s) {
+        if (s.indexOf("@{") < 0) {
+            return s;
+        }
+        java.util.regex.Matcher m = LATE.matcher(s);
+        StringBuilder sb = new StringBuilder();
+        while (m.find()) {
+            String v = ctx.project().getProperties().getProperty(m.group(1),
+                    ctx.session().getUserProperties().getProperty(m.group(1)));
+            m.appendReplacement(sb, java.util.regex.Matcher.quoteReplacement(v == null ? m.group() : v));
+        }
+        return m.appendTail(sb).toString();
+    }
+
     static String renderValue(ExecutionContext ctx, Object value) throws NotCacheableException {
         if (value == null) {
             return "null";
         }
         if (value instanceof String s) {
-            return ctx.normalizer().normalize(s);
+            return ctx.normalizer().normalize(lateReplace(ctx, s));
         }
         if (value instanceof File f) {
             return ctx.normalizer().normalize(f.getAbsolutePath());

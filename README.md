@@ -17,6 +17,12 @@ them. Tool integrations live outside it, as adapters.
 
 You don't need a Maven fork or a core patch, and you don't have to change your POMs.
 
+## Performance
+
+On a 20-module reactor: a cold build costs about **6%** more than raw Maven. A warm cache makes a clean
+build **5.8× faster** with mvn and **20× faster** with mvnd (0.6s). One build-system task takes 0.6s
+through mvnd. Details in [docs/performance.md](docs/performance.md).
+
 ## For tool authors
 
 mojo-io is meant to be cached **by your build system** (Nx, Bazel, CI caches, …), not only by its
@@ -117,6 +123,8 @@ mise tasks              # list tasks
 | `mise run demo -- [--maven4] [--fresh] <goals>` | Run the sample project with the extension, e.g. `mise run demo -- --fresh surefire:test`. |
 | `mise run install` | Install to `~/.m2` for use via `.mvn/extensions.xml`. |
 | `mise run cache:clear` | Delete the local cache. |
+| `mise run it:mvnd` | Integration tests through the Maven Daemon (`MOJOIO_MVND_HOME` overrides the mise-installed one). |
+| `mise run perf` | Benchmark raw Maven vs mojo-io, with mvn and mvnd ([results](docs/performance.md)). |
 | `mise run registry:check` | Verify the built-in declarations against every plugin version in `registry/checked-versions.txt`. |
 
 ## Use it in a project
@@ -178,7 +186,7 @@ Every cacheable execution writes its key's inputs, and which declaration was use
 | `mojo-io-maven-extension` | The core extension: execution strategy, declaration lookup, project-state diff, prerequisites. |
 | `mojo-io-it` | Integration tests that fork real Maven 3.9 / 4 builds of the projects in `src/it/projects`. |
 | `mise.toml`, `mise-tasks/` | Toolchain and tasks. |
-| `docs/` | [Design notes](docs/design.md), [versioning](docs/versioning.md), formats ([plugin-io](docs/plugin-io.md), [task graph](docs/task-graph.md), [state](docs/state-format.md)), [Maven 4 proposal](docs/maven4-proposal.md). |
+| `docs/` | [Design notes](docs/design.md), [performance](docs/performance.md), [versioning](docs/versioning.md), formats ([plugin-io](docs/plugin-io.md), [task graph](docs/task-graph.md), [state](docs/state-format.md)), [Maven 4 proposal](docs/maven4-proposal.md). |
 
 ## Development
 

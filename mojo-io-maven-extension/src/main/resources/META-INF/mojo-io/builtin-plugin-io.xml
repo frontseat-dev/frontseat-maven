@@ -125,8 +125,9 @@
       </inputs>
       <outputs>
         <directory parameter="reportsDirectory"/>
-        <!-- JaCoCo's agent writes coverage during the test run. -->
-        <javaagentDestFiles parameter="argLine"/>
+        <!-- The tests run with hooks of their own (JaCoCo's agent, test code writing files): every file
+             written in the build directory during the run is an output. -->
+        <observed/>
       </outputs>
       <ignoredParameters>
         classesDirectory, testClassesDirectory,
@@ -155,7 +156,7 @@
       </inputs>
       <outputs>
         <directory parameter="reportsDirectory"/>
-        <javaagentDestFiles parameter="argLine"/>
+        <observed/>
       </outputs>
       <ignoredParameters>
         classesDirectory, defaultClassesDirectory, testClassesDirectory,

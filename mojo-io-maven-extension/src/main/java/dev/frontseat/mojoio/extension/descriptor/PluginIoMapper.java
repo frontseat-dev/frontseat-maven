@@ -37,6 +37,10 @@ final class PluginIoMapper {
         return b.build();
     }
 
+    private static java.util.List<String> split(String patterns) {
+        return java.util.Arrays.stream(patterns.split("\\s*,\\s*")).filter(p -> !p.isBlank()).toList();
+    }
+
     private static InputSpec input(IoDeclaration d) {
         return switch (d.kind()) {
             case "files" -> d.attribute("expression").isPresent()
@@ -60,6 +64,8 @@ final class PluginIoMapper {
             case "file" -> Outputs.file(d.required("parameter"), d.required("name"));
             case "copiedResources" -> Outputs.copiedResources(d.required("resourcesParameter"),
                     d.required("outputDirectoryParameter"));
+            case "observed" -> Outputs.observed(split(d.attribute("includes").orElse("**")),
+                    split(d.attribute("excludes").orElse("")));
             case "javaagentDestFiles" -> Outputs.javaagentDestFiles(d.required("parameter"));
             default -> throw new PluginIoException("unknown output kind <" + d.kind() + ">");
         };

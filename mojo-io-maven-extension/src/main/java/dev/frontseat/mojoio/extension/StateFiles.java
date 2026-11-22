@@ -45,7 +45,7 @@ final class StateFiles {
     }
 
     /** The identity used to decide whether a recorded execution is part of the current plan. */
-    private static String identity(String executionId) {
+    static String identity(String executionId) {
         // g:a:v:goal@id -> g:a:goal@id (another plugin version still means "this execution will run")
         String[] at = executionId.split("@", 2);
         String[] gav = at[0].split(":");
@@ -65,11 +65,19 @@ final class StateFiles {
      * Replays the recorded state of every execution that is not in {@code plan}: those mojos will not
      * run in this build, but later mojos may depend on what they did (e.g. JaCoCo's {@code argLine}).
      */
-    static void replayPending(MavenProject project, Collection<MojoExecution> plan, PathNormalizer normalizer,
-                              org.apache.maven.project.MavenProjectHelper helper) {
+    /**
+     * @return the replayed records per execution identity ({@code g:a:goal@id}): if one of those
+     *         executions runs later in the same build anyway (Maven 4's concurrent builder calls the
+     *         strategy once per lifecycle step, with partial plans), its diff misses what replay already
+     *         applied, and the caller merges these back in.
+     */
+    static java.util.Map<String, List<CacheEntry.StateRecord>> replayPending(MavenProject project,
+            Collection<MojoExecution> plan, PathNormalizer normalizer,
+            org.apache.maven.project.MavenProjectHelper helper) {
+        java.util.Map<String, List<CacheEntry.StateRecord>> applied = new java.util.HashMap<>();
         Path dir = directory(project);
         if (!Files.isDirectory(dir)) {
-            return;
+            return applied;
         }
         Set<String> planned = new LinkedHashSet<>();
         for (MojoExecution m : plan) {
@@ -108,11 +116,13 @@ final class StateFiles {
                 continue;
             }
             ProjectState.apply(records, project, normalizer, helper);
+            applied.put(identity(state.execution()), records);
             if (records.isEmpty()) {
                 continue;
             }
             LOG.info("[mojo-io] STATE {} @ {} replayed {} change(s)", state.execution(), project.getArtifactId(),
                     records.size());
         }
+        return applied;
     }
 }

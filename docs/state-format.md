@@ -32,6 +32,8 @@ change property argLine -javaagent%3A%40%40M2REPO%40%40%2F...%3Ddestfile%3D%40%4
 | `change propertyRemoved <name> <_>` | Removed a project property. |
 | `change artifactFile <_> <path>` | Set the main artifact file. |
 | `change attachedArtifact <type>:<classifier> <path>` | Attached an artifact (e.g. `test-jar:tests`, `java-source:sources`). |
+| `change systemProperty <name> <value>` / `change systemPropertyRemoved <name> <_>` | Set or cleared a JVM system property (a hook handing data to later mojos). JVM/runtime properties are not recorded. |
+| `change output <_> <path>` | Informational, not replayed: a file the execution wrote that an `<observed/>` output covers. External caches store exactly these files. |
 | `incomplete <reason>` | The execution made changes this format can't express (removed source roots, changed resources, replaced attachments). Don't replay it; treat the execution as not restorable. |
 
 Paths in values use the tokens `@@BASEDIR@@` (the module), `@@ROOT@@` (the multi-module root) and

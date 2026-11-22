@@ -35,6 +35,8 @@ class ExternalBuildSystemIT {
         assertTrue(warm.stream().allMatch(ReferenceBuildSystem.Outcome::hit), warm.toString());
         assertTrue(Files.isRegularFile(b.dir().resolve("lib-core/target/classes/sample/core/Greeter.class")));
         assertTrue(Files.isRegularFile(b.dir().resolve("app/target/surefire-reports/TEST-sample.app.AppTest.xml")));
+        // Written by JaCoCo's agent inside the test JVM: an observed output, listed in the state file.
+        assertTrue(Files.isRegularFile(b.dir().resolve("lib-core/target/jacoco.exec")), "observed output restored");
 
         // Change one test: only that project's test-compile and test run, against restored upstream
         // outputs and replayed state (lib-core's artifact file, JaCoCo's argLine relocated to b).
@@ -55,6 +57,23 @@ class ExternalBuildSystemIT {
         assertTrue(Files.readString(b.dir().resolve("app/target/surefire-reports/TEST-sample.app.AppTest.xml"))
                 .contains("tests=\"3\""));
         assertTrue(Files.size(b.dir().resolve("app/target/jacoco.exec")) > 0, "agent attached via replayed state");
-        assertFalse(Files.exists(b.dir().resolve("lib-core/target/jacoco.exec")), "lib-core tests did not run");
+        assertTrue(Files.readString(b.dir().resolve("lib-core/target/surefire-reports/TEST-sample.core.GreeterTest.xml"))
+                .contains("tests=\"2\""), "lib-core results restored, not re-run");
+
+        // Maven 4 phase links: app's tasks depend on lib-core's "ready" (compile + resources), not on its
+        // tests. Changing a lib-core test re-runs lib-core's test tasks only; every app task stays a hit.
+        Path libTest = b.dir().resolve("lib-core/src/test/java/sample/core/GreeterTest.java");
+        Files.writeString(libTest, Files.readString(libTest).replace("class GreeterTest {", """
+                class GreeterTest {
+
+                    @Test
+                    void greetsTheWorld() {
+                        assertEquals("Hello, world!", new Greeter().greet("world"));
+                    }
+                """));
+        List<String> missedByLibTest = bs.build("test").stream().filter(o -> !o.hit())
+                .map(ReferenceBuildSystem.Outcome::task).collect(Collectors.toList());
+        assertEquals(List.of("com.example.samples:lib-core:test-compile", "com.example.samples:lib-core:test"),
+                missedByLibTest);
     }
 }
