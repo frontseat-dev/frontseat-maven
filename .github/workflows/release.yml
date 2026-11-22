@@ -3,33 +3,35 @@ name: Release
 # Publishes the Maven artifacts to GitHub Packages:
 #   https://maven.pkg.github.com/frontseat-dev/frontseat-maven
 #
-# - Push a tag "v1.2.3": publishes version 1.2.3.
-# - Run manually (Actions > Release > Run workflow): publishes the version you enter, or the version
-#   in the POMs (a -SNAPSHOT) when left empty.
-# - A commit on any branch whose message contains "[publish-snapshot]" publishes the POMs' -SNAPSHOT
-#   version: a way to try the pipeline before the workflow is on the default branch.
+# Run it from Actions > Release > Run workflow:
+# - leave "version" empty: the version comes from the Conventional Commits since the last v* tag
+#   ("fix:" and other types -> patch, "feat:" -> minor, "!" or "BREAKING CHANGE:" -> major; see the
+#   maven-release-plugin configuration in pom.xml);
+# - or give a version to publish exactly that one.
+# The run tags the released commit v<version>. A commit on any branch whose message contains
+# "[publish-snapshot]" publishes the POMs' -SNAPSHOT version instead.
 on:
   push:
-    tags: ['v*']
     branches: ['**']
   workflow_dispatch:
     inputs:
       version:
-        description: Version to publish (empty = the version in the POMs)
+        description: Version to publish (empty = computed from Conventional Commits)
         required: false
 
 jobs:
   publish:
     if: >-
       github.event_name == 'workflow_dispatch'
-      || startsWith(github.ref, 'refs/tags/v')
       || contains(github.event.head_commit.message, '[publish-snapshot]')
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write   # the release tag
       packages: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # the version policy reads the commits since the last tag
       - uses: jdx/mise-action@v2
       - uses: actions/cache@v4
         with:
@@ -56,7 +58,14 @@ jobs:
           INPUT_VERSION: ${{ github.event.inputs.version }}
         run: |
           version="$INPUT_VERSION"
-          case "$GITHUB_REF" in refs/tags/v*) version="${GITHUB_REF#refs/tags/v}" ;; esac
+          if [ -z "$version" ] && [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            # Ask the release plugin's version policy, without committing or tagging anything.
+            mvn -B -q release:prepare -DdryRun=true -DpreparationGoals=validate -DpushChanges=false
+            version=$(sed -n 's/^project\.rel\.dev\.frontseat\.mojoio\\:mojo-io-parent=//p' release.properties)
+            mvn -B -q release:clean
+            [ -n "$version" ] || { echo "could not compute the release version" >&2; exit 1; }
+            echo "Conventional Commits since $(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || echo 'the first commit') -> $version"
+          fi
           if [ -n "$version" ]; then
             mvn -B -q versions:set -DnewVersion="$version" -DgenerateBackupPoms=false -DprocessAllModules=true
             mvn -B -q -f adapters/reapi/pom.xml versions:set -DnewVersion="$version" -DgenerateBackupPoms=false
@@ -71,10 +80,10 @@ jobs:
         run: |
           repo="https://maven.pkg.github.com/${GITHUB_REPOSITORY}/dev/frontseat/mojoio"
           # A release version can be published once. Skip what is already there, so a failed release can
-          # simply be run again.
+          # simply be run again. (GitHub Packages answers a download with a redirect: follow it.)
           published() {
             case "$VERSION" in *-SNAPSHOT) return 1 ;; esac
-            code=$(curl -s -o /dev/null -w '%{http_code}' -u "${GITHUB_ACTOR}:${GITHUB_TOKEN}" "${repo}/$1/${VERSION}/$1-${VERSION}.pom")
+            code=$(curl -s -L -o /dev/null -w '%{http_code}' -u "${GITHUB_ACTOR}:${GITHUB_TOKEN}" "${repo}/$1/${VERSION}/$1-${VERSION}.pom")
             [ "$code" = 200 ]
           }
           # The REAPI adapter resolves mojo-io-cache from the local repository.
@@ -86,3 +95,15 @@ jobs:
           if [ -n "$modules" ]; then mvn -B deploy -DskipTests -DskipITs -pl "$modules"; fi
           if published mojo-io-reapi; then echo "mojo-io-reapi ${VERSION} is already published"
           else mvn -B -f adapters/reapi/pom.xml deploy -DskipTests; fi
+      - name: Tag v${{ steps.version.outputs.version }}
+        if: ${{ !endsWith(steps.version.outputs.version, '-SNAPSHOT') }}
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          if git ls-remote --exit-code --tags origin "refs/tags/v${VERSION}" >/dev/null; then
+            echo "v${VERSION} is already tagged"
+          else
+            git -c user.name=github-actions -c user.email=github-actions@users.noreply.github.com \
+              tag -a "v${VERSION}" "${GITHUB_SHA}" -m "mojo-io ${VERSION}"
+            git push origin "refs/tags/v${VERSION}"
+          fi
