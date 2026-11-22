@@ -138,8 +138,21 @@ non-clean build. Declarations used: the built-in ones plus `static-analysis.xml`
 | Apache Commons Numbers | 14 | 132s | 124s | 5s | identical (1,334 files) | nothing |
 | Apache Commons RNG | 7 | 179s | 189s | 9s | identical (1,918 files) | `revapi:check` |
 | Google Gson (without `test-shrinker`, which needs a repository this machine can't reach) | 6 | 50s | 51s | 12s | identical (1,744 files) | `spotless:check`, `templating:filter-sources`, `protobuf:generate-test`, `proguard:proguard`, `bnd:bnd-process` |
+| Spring PetClinic, with [`spring-boot.xml`](../examples/plugin-io/spring-boot.xml) | 1 | 29s | 34s | 7–8s | identical (410 files, the executable jar included) | `git-commit-id:revision` |
+| MapStruct examples (annotation processors: MapStruct, Lombok) | 25 | 23s | 24s | 8s | identical (452 files) | Kotlin and protobuf goals |
 
 Notes:
+- **Annotation processors** (`annotationProcessorPaths`) used to make the compiler uncacheable. Each
+  processor now counts by its coordinates, with a version from dependency management resolved the way
+  the compiler resolves it; a SNAPSHOT or range version still runs uncached. On the MapStruct examples
+  21 compile executions are restored. The Kotlin example's Java compile misses on every build, and
+  rightly: MapStruct writes a fresh `@Generated` date into the sources it generates through kapt.
+- **Spring PetClinic**: `spring-boot:repackage` is restored as an executable jar (94 bundled libraries,
+  plus the `.original`). For a build system that caches whole tasks, 2 of its 3 stage tasks are
+  cacheable: `git-commit-id:revision` (it reads the git repository) stays undeclared.
+- **Task-level caching** (Nx, a remote execution grid) on these projects: MapStruct examples 60 of 63
+  stage tasks cacheable (the rest hold Kotlin and protobuf goals), PetClinic 2 of 3, Tycho's RCP demo
+  1 of 14 (see below).
 - **Gson's `bnd:bnd-process`** writes a manifest whose attribute order depends on the manifest it
   finds from the previous build. A non-clean rebuild therefore differs from a clean build, with or
   without mojo-io, and re-runs what reads the classes directory. Compared like for like, the outputs
