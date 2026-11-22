@@ -59,17 +59,20 @@ public final class Inputs {
                 return List.of(ResolvedInput.classpath("testClasspath", List.of(), "test"));
             }
             List<Path> paths = new ArrayList<>();
+            List<String> versioned;
             try {
                 Path classes = Path.of(ctx.project().getBuild().getOutputDirectory()).toAbsolutePath().normalize();
                 Path testClasses = Path.of(ctx.project().getBuild().getTestOutputDirectory()).toAbsolutePath().normalize();
-                List<Path> elements = ctx.testClasspath();
-                if (elements == null) {
-                    elements = new ArrayList<>();
+                dev.frontseat.mojoio.extension.ExecutionContext.Classpath classpath = ctx.testClasspath();
+                if (classpath == null) {
+                    List<Path> elements = new ArrayList<>();
                     for (String element : ctx.project().getTestClasspathElements()) {
                         elements.add(Path.of(element));
                     }
+                    classpath = dev.frontseat.mojoio.extension.DependencyResolution.byVersionOf(ctx.project(), ctx.session(), elements);
                 }
-                for (Path element : elements) {
+                versioned = classpath.versioned();
+                for (Path element : classpath.paths()) {
                     Path path = element.toAbsolutePath().normalize();
                     if (ownOutputs || !(path.equals(classes) || path.equals(testClasses))) {
                         paths.add(element);
@@ -80,7 +83,12 @@ public final class Inputs {
             } catch (Exception e) {
                 throw new NotCacheableException("cannot compute test classpath: " + e.getMessage(), e);
             }
-            return List.of(ResolvedInput.classpath("testClasspath", paths, "test"));
+            List<ResolvedInput> inputs = new ArrayList<>();
+            inputs.add(ResolvedInput.classpath("testClasspath", paths, "test"));
+            if (!versioned.isEmpty()) {
+                inputs.add(ResolvedInput.value("testClasspath.versions", String.join(",", versioned)));
+            }
+            return inputs;
         };
     }
 
@@ -156,6 +164,13 @@ public final class Inputs {
         // Properties are written apart and sorted: their order in the model is that of a hash table,
         // which depends on how the table grew, not on its content.
         org.apache.maven.model.Model model = project.getModel().clone();
+        // Eclipse Tycho adds the bundles it resolved as system dependencies whose systemPath is a
+        // placeholder file with a random name until the bundle is fetched: the version identifies them.
+        for (org.apache.maven.model.Dependency d : model.getDependencies()) {
+            if (d.getGroupId() != null && d.getGroupId().startsWith("p2.")) {
+                d.setSystemPath(null);
+            }
+        }
         java.util.TreeMap<String, String> properties = new java.util.TreeMap<>();
         if (withProperties) {
             model.getProperties().stringPropertyNames().forEach(k -> properties.put(k, model.getProperties().getProperty(k)));

@@ -102,7 +102,7 @@ forking mojo isn't cached.
 
 | Kind | Attributes | Collects |
 |---|---|---|
-| `directory` | `parameter`, `includes?` (default `**`) | Files under a directory parameter matching Ant patterns. |
+| `directory` | `parameter` or `expression`, `includes?` (default `**`) | Files under a directory (a parameter, or a Maven expression such as `${project.build.outputDirectory}`) matching Ant patterns. |
 | `observed` | `includes?` (default `**`), `excludes?` | Whatever the mojo writes in the build directory while it runs (patterns relative to it), measured at run time. For mojos that run code with hooks of its own: tests, agents (JaCoCo), forked tools. The exact files are listed as `output` records in the state file. |
 | `file` | `parameter`, `name` | One file in a directory parameter. `name` is a template: `{param}` is a parameter's value, `{-param}` is `-value` when not empty, e.g. `{finalName}{-classifier}.jar`. |
 | `copiedResources` | `resourcesParameter`, `outputDirectoryParameter` | The files a resources mojo copies. |

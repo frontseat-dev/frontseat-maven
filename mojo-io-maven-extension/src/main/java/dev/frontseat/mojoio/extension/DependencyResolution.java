@@ -55,7 +55,7 @@ public class DependencyResolution {
      * artifacts and filter are put back afterwards, so the mojo that runs next sees what it would have
      * seen without this call.
      */
-    public List<java.nio.file.Path> testClasspath(MavenProject project, MavenSession session)
+    public ExecutionContext.Classpath testClasspath(MavenProject project, MavenSession session)
             throws LifecycleExecutionException {
         Collection<String> test = toScopes(Artifact.SCOPE_TEST);
         Saved saved = save(project);
@@ -66,12 +66,58 @@ public class DependencyResolution {
             for (String element : project.getTestClasspathElements()) {
                 paths.add(java.nio.file.Path.of(element));
             }
-            return paths;
+            return byVersion(project, session, paths);
         } catch (org.apache.maven.artifact.DependencyResolutionRequiredException e) {
             throw new LifecycleExecutionException("cannot compute the test classpath: " + e.getMessage(), e);
         } finally {
             saved.restore();
         }
+    }
+
+    /**
+     * Eclipse Tycho resolves bundles from p2 repositories and adds them to the project as system-scoped
+     * dependencies in groups {@code p2.*}, with fully qualified versions
+     * ({@code org.eclipse.swt:3.130.0.v20250528-1759}). Their files are materialised lazily (until then a
+     * placeholder in the temporary directory), so the same build can see a placeholder once and the real
+     * file the next time. Such a bundle is identified by its version, which p2 never reuses for other
+     * content; a bundle built in this reactor is hashed by content like any project output.
+     */
+    public static ExecutionContext.Classpath byVersionOf(MavenProject project, MavenSession session,
+                                                         List<java.nio.file.Path> elements) {
+        return byVersion(project, session, elements);
+    }
+
+    static ExecutionContext.Classpath byVersion(MavenProject project, MavenSession session,
+                                                List<java.nio.file.Path> elements) {
+        List<java.nio.file.Path> reactor = new java.util.ArrayList<>();
+        for (MavenProject p : session.getAllProjects()) {
+            if (p.getBasedir() != null) {
+                reactor.add(p.getBasedir().toPath().toAbsolutePath().normalize());
+            }
+        }
+        java.util.Set<java.nio.file.Path> versionedFiles = new java.util.HashSet<>();
+        java.util.TreeSet<String> versioned = new java.util.TreeSet<>();
+        for (Artifact a : project.getArtifacts()) {
+            if (a.getGroupId() == null || !a.getGroupId().startsWith("p2.")) {
+                continue;
+            }
+            java.nio.file.Path file = a.getFile() == null ? null : a.getFile().toPath().toAbsolutePath().normalize();
+            java.nio.file.Path f = file;
+            if (f != null && reactor.stream().anyMatch(f::startsWith)) {
+                continue; // built in this reactor: hashed by content
+            }
+            versioned.add(a.getGroupId() + ":" + a.getArtifactId() + ":" + a.getType() + ":" + a.getVersion());
+            if (file != null) {
+                versionedFiles.add(file);
+            }
+        }
+        List<java.nio.file.Path> paths = new java.util.ArrayList<>();
+        for (java.nio.file.Path e : elements) {
+            if (!versionedFiles.contains(e.toAbsolutePath().normalize())) {
+                paths.add(e);
+            }
+        }
+        return new ExecutionContext.Classpath(paths, List.copyOf(versioned));
     }
 
     /**

@@ -109,6 +109,7 @@ storing an entry, the mojo just runs.
 | `cyclonedx-maven-plugin` | `makeAggregateBom` | 📄 | | 2.9.3 | the aggregate BOM | Same file. An aggregator: cached because the declaration covers the whole reactor (`reactorModels`). Needs network access. |
 | `spdx-maven-plugin` | `createSPDX` | 📄 | | | the SPDX document | Same file. |
 | `moditect-maven-plugin` | `add-module-info` | 📄 | | | the rewritten jar | Same file. |
+| `tycho-compiler-plugin` | `compile`, `testCompile` | 📄 | | 5.0.1 | classes | Copy [`examples/plugin-io/tycho.xml`](examples/plugin-io/tycho.xml). p2 bundles count by their qualified versions. Use a fixed or git-based build qualifier. |
 | `maven-antrun-plugin` | `run` | 📄 | | | whatever it writes | An Ant script can do anything: declare it per project, for one known script ([example](examples/plugin-io/apache-commons-parent.xml)). |
 | `maven-javadoc-plugin` | `javadoc`, `jar` | ➖ | | | | |
 | `maven-clean-plugin` | `clean` | ⛔ | | | | Deletes outputs; nothing to cache. |
