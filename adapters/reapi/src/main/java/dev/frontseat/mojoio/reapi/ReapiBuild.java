@@ -119,6 +119,40 @@ public final class ReapiBuild {
         }
     }
 
+    /**
+     * Tasks with every task they depend on first. The graph lists projects in Maven's reactor order,
+     * which does not know about projects referenced from configuration (a Tycho target definition).
+     */
+    static List<Task> dependencyOrder(Map<String, Task> tasks) {
+        List<Task> order = new ArrayList<>();
+        Set<String> visited = new LinkedHashSet<>();
+        for (String id : tasks.keySet()) {
+            visit(id, tasks, visited, order);
+        }
+        return order;
+    }
+
+    private static void visit(String id, Map<String, Task> tasks, Set<String> visited, List<Task> order) {
+        Task task = tasks.get(id);
+        if (task == null || !visited.add(id)) {
+            return;
+        }
+        for (String dep : task.dependsOn()) {
+            visit(dep, tasks, visited, order);
+        }
+        order.add(task);
+    }
+
+    /**
+     * The task's project and the reactor projects it needs that Maven's "-am" can miss: named in
+     * configuration, or added as dependencies while loading (Eclipse Tycho).
+     */
+    static String projectList(JsonNode project) {
+        List<String> ids = new ArrayList<>(List.of(project.get("id").asText()));
+        project.path("reactorReferences").forEach(r -> ids.add(r.asText()));
+        return String.join(",", ids);
+    }
+
     boolean run() throws Exception {
         long start = System.nanoTime();
         JsonNode graph = exportGraph();
@@ -141,7 +175,7 @@ public final class ReapiBuild {
 
         ExecutorService pool = Executors.newFixedThreadPool(options.parallel());
         Map<String, CompletableFuture<TaskResult>> futures = java.util.Collections.synchronizedMap(new LinkedHashMap<>());
-        for (Task task : tasks.values()) { // the graph lists tasks in dependency order
+        for (Task task : dependencyOrder(tasks)) {
             List<CompletableFuture<TaskResult>> deps = task.dependsOn().stream().map(futures::get)
                     .filter(java.util.Objects::nonNull).toList();
             futures.put(task.id(), CompletableFuture.allOf(deps.toArray(CompletableFuture[]::new))
@@ -256,6 +290,22 @@ public final class ReapiBuild {
                 }
             }
 
+            // What build extensions read while Maven loads the projects of this invocation, before any
+            // mojo runs (Tycho: manifests, feature.xml, the target definition): this project's and
+            // those of the reactor projects it loads besides.
+            List<JsonNode> loaded = new ArrayList<>(List.of(project));
+            project.path("reactorReferences").forEach(r -> {
+                if (projects.containsKey(r.asText())) {
+                    loaded.add(projects.get(r.asText()));
+                }
+            });
+            for (JsonNode p : loaded) {
+                Path dir = root.resolve(p.get("path").asText());
+                for (JsonNode f : p.path("loadFiles")) {
+                    addFile(input, root, resolve(f.asText(), root, dir));
+                }
+            }
+
             // Upstream outputs: the target directory of the latest task per project among everything this
             // task depends on, mounted by digest.
             Map<String, TaskResult> latest = new LinkedHashMap<>();
@@ -274,12 +324,14 @@ public final class ReapiBuild {
                 }
             }
             boolean ownTarget = false;
+            List<String> mountedTargets = new ArrayList<>();
             for (Map.Entry<String, TaskResult> e : latest.entrySet()) {
                 if (e.getValue().targetRoot() == null) {
                     continue;
                 }
                 String path = projects.get(e.getKey()).get("path").asText();
                 input.dir(path).dir("target").mounted = e.getValue().targetRoot();
+                mountedTargets.add(path.isEmpty() ? "target" : path + "/target");
                 ownTarget |= e.getKey().equals(task.projectId());
             }
 
@@ -288,7 +340,7 @@ public final class ReapiBuild {
 
             String target = task.projectPath().isEmpty() ? "target" : task.projectPath() + "/target";
             List<String> maven = new ArrayList<>(List.of(options.maven(), "-B", "--no-transfer-progress", "-pl",
-                    task.projectId(), "-am", "-Dmojoio.only=" + task.projectId(), "-Dmojoio.cache.enabled=false",
+                    projectList(project), "-am", "-Dmojoio.only=" + task.projectId(), "-Dmojoio.cache.enabled=false",
                     "-Dmojoio.prerequisites=false", "-Dmojoio.fingerprint=" + fingerprint(task, project)));
             maven.addAll(options.mavenArgs());
             task.executions().forEach(e -> maven.add(e.get("invocation").asText()));
@@ -303,7 +355,15 @@ public final class ReapiBuild {
                 script.append("cp -R \"$0\" \"$0.mojoio\" && chmod -R u+w \"$0.mojoio\" && rm -rf \"$0\""
                         + " && mv \"$0.mojoio\" \"$0\" || exit 1; ");
             }
+            // - Tools write absolute paths into the target directory (Tycho's local-artifacts.properties
+            //   names the module's p2 repository files). Every action has its own sandbox directory, so
+            //   outputs carry a token in its place, put back for the sandbox that reads them. Files are
+            //   replaced, not edited: inputs are hardlinks into the worker's cache.
+            for (String mounted : mountedTargets) {
+                script.append(relocate(mounted, "$T", "$PWD"));
+            }
             script.append("\"$@\"; rc=$?; ");
+            script.append(relocate("$0", "$PWD", "$T"));
             Set<String> bookkeeping = new java.util.TreeSet<>();
             task.executions().forEach(e -> bookkeeping.addAll(texts(e.get("ignoredWrites"))));
             for (String pattern : bookkeeping) {
@@ -315,7 +375,7 @@ public final class ReapiBuild {
                         : "rm -f \"$0\"/" + pattern + "; ");
             }
             script.append("exit $rc");
-            List<String> arguments = new ArrayList<>(List.of("/bin/sh", "-c", script.toString(), target));
+            List<String> arguments = new ArrayList<>(List.of("/bin/sh", "-c", "T=" + SANDBOX_TOKEN + "; " + script, target));
             arguments.addAll(maven);
             Command.Builder command = Command.newBuilder().addAllArguments(arguments).addOutputPaths(target);
             new TreeMap<>(options.env()).forEach((k, v) -> command.addEnvironmentVariables(
@@ -406,6 +466,20 @@ public final class ReapiBuild {
                     + "\n" + new String(stdout, StandardCharsets.UTF_8) + new String(stderr, StandardCharsets.UTF_8));
         }
         return result;
+    }
+
+    /** Stands for the action's sandbox directory in the text files of its outputs. */
+    static final String SANDBOX_TOKEN = "@@MOJOIO_SANDBOX@@";
+
+    /**
+     * Shell commands replacing {@code from} by {@code to} in the text files under {@code dir} that
+     * contain it. Each file is replaced by a new one.
+     */
+    static String relocate(String dir, String from, String to) {
+        String d = dir.startsWith("$") ? "\"" + dir + "\"" : "'" + dir + "'";
+        return "[ -d " + d + " ] && grep -rlIF \"" + from + "\" " + d + " | while IFS= read -r f; do"
+                + " sed \"s#" + from + "#" + to + "#g\" \"$f\" > \"$f.mojoio-tmp\" && mv -f \"$f.mojoio-tmp\" \"$f\";"
+                + " done; ";
     }
 
     /** What the input root cannot show: evaluated configuration, plugin versions, JDK, external dependencies. */
@@ -564,6 +638,19 @@ public final class ReapiBuild {
     }
 
     /** Writes every project's final target directory into the workspace. */
+    private static int indexOf(byte[] data, byte[] pattern) {
+        outer:
+        for (int i = 0; i + pattern.length <= data.length; i++) {
+            for (int j = 0; j < pattern.length; j++) {
+                if (data[i + j] != pattern[j]) {
+                    continue outer;
+                }
+            }
+            return i;
+        }
+        return -1;
+    }
+
     private void download(Map<String, Task> tasks, List<TaskResult> results) throws IOException {
         Map<String, TaskResult> byId = new LinkedHashMap<>();
         results.forEach(r -> byId.put(r.id(), r));
@@ -599,9 +686,16 @@ public final class ReapiBuild {
             Map<Path, FileNode> files = new LinkedHashMap<>();
             collect(root, target, directories, files);
             Map<Digest, byte[]> contents = cas.readAll(files.values().stream().map(FileNode::getDigest).toList());
+            byte[] token = SANDBOX_TOKEN.getBytes(StandardCharsets.UTF_8);
             for (Map.Entry<Path, FileNode> f : files.entrySet()) {
                 Files.createDirectories(f.getKey().getParent());
-                Files.write(f.getKey(), contents.get(f.getValue().getDigest()));
+                byte[] content = contents.get(f.getValue().getDigest());
+                if (indexOf(content, token) >= 0 && indexOf(content, new byte[] {0}) < 0) {
+                    // A text file naming the sandbox an action ran in: name this workspace instead.
+                    content = new String(content, StandardCharsets.UTF_8)
+                            .replace(SANDBOX_TOKEN, options.workspace().toString()).getBytes(StandardCharsets.UTF_8);
+                }
+                Files.write(f.getKey(), content);
                 if (f.getValue().getIsExecutable()) {
                     f.getKey().toFile().setExecutable(true);
                 }

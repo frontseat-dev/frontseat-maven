@@ -104,7 +104,8 @@ public final class PluginIoReader {
             for (Element mojo : children(plugin, "mojo")) {
                 mojos.add(readMojo(mojo, source));
             }
-            plugins.add(new PluginIo(attr(plugin, "groupId"), attr(plugin, "artifactId"), mojos));
+            plugins.add(new PluginIo(attr(plugin, "groupId"), attr(plugin, "artifactId"), mojos,
+                    List.copyOf(list(plugin, "projectLoad"))));
         }
         return plugins;
     }

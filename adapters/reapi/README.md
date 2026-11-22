@@ -12,8 +12,8 @@ execution grid, and what a Bazel rule set or another REAPI client has to do.
 
 | REAPI | From the task graph |
 |---|---|
-| **Command** | `mvn -pl <id> -am -Dmojoio.only=<id> <invocations>`, plus `-Dmojoio.fingerprint=` covering what isn't in the input root: evaluated plugin configuration, plugin versions, JDK, external dependencies. |
-| **Input root** | `.mvn/`, every reactor POM, the task's declared `files` inputs, and the `target/` directory of each project among the tasks it depends on. |
+| **Command** | `mvn -pl <id>,<reactorReferences> -am -Dmojoio.only=<id> <invocations>`, plus `-Dmojoio.fingerprint=` covering what isn't in the input root: evaluated plugin configuration, plugin versions, JDK, external dependencies. |
+| **Input root** | `.mvn/`, every reactor POM, the task's declared `files` inputs, the `loadFiles` of its project and its `reactorReferences`, and the `target/` directory of each project among the tasks it depends on. |
 | **Output** | The project's `target/` directory, which includes mojo-io's state files. |
 | **Platform / tools** | Maven, the JDK and the local repository belong to the worker (its image). |
 
@@ -35,6 +35,13 @@ Two things a REAPI client must do that a local build system doesn't:
 - **Remove bookkeeping from the output.** The graph lists each execution's `ignoredWrites` (for example
   `maven-status/`, which holds absolute paths of the worker). The wrapper deletes them, so equal inputs
   give byte-identical outputs.
+- **Relocate absolute paths.** Every action runs in its own sandbox directory, and some tools write
+  absolute paths into `target/` (Tycho's `local-artifacts.properties` names the module's p2 repository
+  files). After the build, the wrapper replaces the sandbox directory with a token in the text files of
+  the output; before the build, it puts this sandbox's directory back in the mounted `target/`
+  directories (each such file is replaced, not edited: inputs are hardlinks into the worker's cache).
+  `--download` puts the local workspace there. Equal inputs thus also give byte-identical outputs when
+  a tool records paths.
 
 ## Limits
 

@@ -25,6 +25,9 @@ the goals you want described; `verify` covers the default lifecycle up to packag
     "id": "com.example:app", "version": "1.0", "path": "app", "packaging": "jar",
     "dependsOn": ["com.example:parent", "com.example:lib-core"],   // reactor edges
     "poms": ["{projectRoot}/pom.xml", "{workspaceRoot}/pom.xml"],   // pom and in-workspace ancestors
+    "loadFiles": [],                       // files build extensions read while the project loads (see below)
+    "configurationReferences": [],         // reactor projects named in plugin configuration
+    "reactorReferences": [],               // every reactor project a task needs: add them to -pl
     "externalDependencies": ["org.junit.jupiter:junit-jupiter-api:jar:5.11.4:test", "…"],
     "executions": [{                                                // in execution order
       "id": "org.apache.maven.plugins:maven-compiler-plugin:3.13.0:compile@default-compile",
@@ -67,6 +70,31 @@ Consumers substitute their own values.
 Besides the declared inputs, a conservative consumer also hashes `poms`: they hold the plugin
 configuration, which the graph doesn't evaluate. It should also hash the JDK, which mojo-io's own
 cache keys always include.
+
+### Projects a task needs beyond `-am`
+
+A task runs as `mvn -pl <id> -am …`, and Maven's `-am` follows the dependencies it knew when it
+sorted the reactor. Some projects are missing from it:
+
+- **`configurationReferences`**: reactor projects named by `groupId`/`artifactId` in plugin
+  configuration, such as a Tycho target definition or a `build-tools` module of checkstyle rules.
+  Every task of the project depends on all of their tasks.
+- **Dependencies added while loading.** Eclipse Tycho adds the bundles, features and units a project
+  requires to its model after Maven sorted the reactor. They are in `dependencies`, with edges to
+  their package tasks.
+
+`reactorReferences` lists all of them, transitively: put them in `-pl` next to the task's project
+(`-pl <id>,<ref>,… -am`). Maven's reactor order doesn't know these references either, so order tasks
+by `dependsOn`, not by their position in the file.
+
+### Files read while a project loads
+
+Some build extensions read project files before any mojo runs: Tycho reads `MANIFEST.MF`,
+`feature.xml`, `build.properties` and the target definition to compute dependencies and resolve the
+target platform. Without them Maven can't even load the project. Their `plugin-io.xml` names them
+in a `projectLoad` element, and the graph lists the matching files of each project as `loadFiles`.
+A build system that runs a task in a sandbox provides the `loadFiles` of the task's project and of
+its `reactorReferences`, and hashes them.
 
 ### Outputs and state
 

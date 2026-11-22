@@ -7,10 +7,15 @@ import java.util.Optional;
  * I/O declarations for the goals of one plugin. Coordinates may be omitted when the document ships
  * inside the plugin's own jar (they are implied); they are required anywhere else.
  */
-public record PluginIo(String groupId, String artifactId, List<MojoIo> mojos) {
+public record PluginIo(String groupId, String artifactId, List<MojoIo> mojos, List<String> projectLoad) {
 
     public PluginIo {
         mojos = List.copyOf(mojos);
+        projectLoad = List.copyOf(projectLoad);
+    }
+
+    public PluginIo(String groupId, String artifactId, List<MojoIo> mojos) {
+        this(groupId, artifactId, mojos, List.of());
     }
 
     public Optional<MojoIo> mojo(String goal) {
@@ -23,6 +28,6 @@ public record PluginIo(String groupId, String artifactId, List<MojoIo> mojos) {
     }
 
     public PluginIo withCoordinates(String groupId, String artifactId) {
-        return new PluginIo(groupId, artifactId, mojos);
+        return new PluginIo(groupId, artifactId, mojos, projectLoad);
     }
 }

@@ -29,7 +29,41 @@ final class StateFiles {
 
     private static final Logger LOG = LoggerFactory.getLogger(StateFiles.class);
 
+    /**
+     * The state files this build recorded or replayed, per project directory. A later mojo of the same
+     * build can delete them (a clean bound to an early phase) while what they describe still holds in
+     * memory: they are written again, so the next build that resumes from {@code target/} replays it.
+     */
+    private static final java.util.Map<Path, java.util.Map<Path, StateFile>> KNOWN = new java.util.HashMap<>();
+
     private StateFiles() {}
+
+    /** Starts a build: forgets the files of earlier builds in this JVM (mvnd). */
+    static void reset() {
+        synchronized (KNOWN) {
+            KNOWN.clear();
+        }
+    }
+
+    private static void remember(MavenProject project, Path file, StateFile state) {
+        synchronized (KNOWN) {
+            KNOWN.computeIfAbsent(directory(project), d -> new java.util.LinkedHashMap<>()).put(file, state);
+        }
+    }
+
+    /** Writes back the state files of {@code project} this build knows about and something deleted. */
+    static void restoreDeleted(MavenProject project) {
+        java.util.Map<Path, StateFile> known;
+        synchronized (KNOWN) {
+            known = new java.util.LinkedHashMap<>(KNOWN.getOrDefault(directory(project), java.util.Map.of()));
+        }
+        known.forEach((file, state) -> {
+            if (!Files.exists(file)) {
+                LOG.debug("[mojo-io] rewriting deleted state file {}", file);
+                state.write(file);
+            }
+        });
+    }
 
     static Path directory(MavenProject project) {
         return Path.of(project.getBuild().getDirectory()).resolve(DIRECTORY);
@@ -58,7 +92,10 @@ final class StateFiles {
         for (CacheEntry.StateRecord r : records) {
             changes.add(new StateChange(r.kind(), r.name(), r.value()));
         }
-        new StateFile(executionId(m), phase, changes, incompleteReason).write(file(project, m));
+        restoreDeleted(project);
+        StateFile state = new StateFile(executionId(m), phase, changes, incompleteReason);
+        state.write(file(project, m));
+        remember(project, file(project, m), state);
     }
 
     /**
@@ -123,6 +160,7 @@ final class StateFiles {
                 continue;
             }
             ProjectState.apply(records, project, normalizer, helper);
+            remember(project, f, state);
             applied.put(identity(state.execution()), records);
             if (records.isEmpty()) {
                 continue;

@@ -16,14 +16,23 @@
   version change; extraClasspathElements given as dependencies (such a mojo runs uncached).
 -->
 <plugin-io xmlns="urn:mojo-io:plugin-io:1.0">
+  <!-- The build extension: what it reads while Maven loads each project, to compute the project's
+       dependencies and resolve its target platform. -->
+  <plugin groupId="org.eclipse.tycho" artifactId="tycho-maven-plugin">
+    <projectLoad>
+      META-INF/MANIFEST.MF, META-INF/p2.inf, build.properties, feature.xml, p2.inf, p2iu.xml,
+      category.xml, *.product, *.p2.inf, *.target, .polyglot.*
+    </projectLoad>
+  </plugin>
+
   <plugin groupId="org.eclipse.tycho" artifactId="tycho-compiler-plugin">
     <mojo goal="compile" stamping="carry">
       <inputs>
-        <files expression="${project.compileSourceRoots}"/>
-        <files expression="${project.basedir}/META-INF/MANIFEST.MF"/>
-        <files expression="${project.basedir}/build.properties"/>
-        <!-- useProjectSettings: the project's JDT compiler preferences. -->
-        <files expression="${project.basedir}/.settings"/>
+        <!-- The source folders build.properties names: Tycho sets them as compile source roots while
+             the build runs (validate-classpath), so a task graph exported beforehand would see Maven's
+             defaults instead. The project's own files cover them, MANIFEST.MF, build.properties and
+             the JDT settings (useProjectSettings). -->
+        <projectFiles/>
         <testClasspath ownOutputs="false"/>
       </inputs>
       <outputs>
@@ -35,10 +44,7 @@
     </mojo>
     <mojo goal="testCompile" stamping="carry">
       <inputs>
-        <files expression="${project.testCompileSourceRoots}"/>
-        <files expression="${project.basedir}/META-INF/MANIFEST.MF"/>
-        <files expression="${project.basedir}/build.properties"/>
-        <files expression="${project.basedir}/.settings"/>
+        <projectFiles/>
         <files expression="${project.build.outputDirectory}"/>
         <testClasspath ownOutputs="false"/>
       </inputs>
@@ -47,6 +53,41 @@
         <directory parameter="generatedSourcesDirectory"/>
       </outputs>
       <ignoredWrites>maven-status/**, compile-logs/**</ignoredWrites>
+    </mojo>
+  </plugin>
+
+  <!-- Component descriptions from the OSGi DS annotations of the compiled classes (when enabled in the
+       pom or in .settings/org.eclipse.pde.ds.annotations.prefs). The Service-Component header it hands
+       to package-plugin is recorded as project state. -->
+  <plugin groupId="org.eclipse.tycho" artifactId="tycho-ds-plugin">
+    <mojo goal="declarative-services">
+      <inputs>
+        <!-- It discards what an earlier run left in OSGI-INF before analyzing the classes. -->
+        <files expression="${project.build.outputDirectory}" excludes="OSGI-INF/**"/>
+        <files expression="${project.basedir}/META-INF/MANIFEST.MF"/>
+        <files expression="${project.basedir}/.settings"/>
+        <testClasspath ownOutputs="false"/>
+      </inputs>
+      <outputs>
+        <directory expression="${project.build.outputDirectory}/OSGI-INF"/>
+      </outputs>
+    </mojo>
+  </plugin>
+
+  <!-- PDE's automatic manifest, generated with bnd when the project has a pde.bnd file; otherwise it
+       does nothing. -->
+  <plugin groupId="org.eclipse.tycho" artifactId="tycho-bnd-plugin">
+    <mojo goal="process">
+      <inputs>
+        <files expression="${project.basedir}/pde.bnd"/>
+        <files expression="${project.basedir}/META-INF/MANIFEST.MF"/>
+        <files expression="${project.basedir}/build.properties"/>
+        <files expression="${project.build.outputDirectory}"/>
+        <testClasspath ownOutputs="false"/>
+      </inputs>
+      <outputs>
+        <observed/>
+      </outputs>
     </mojo>
   </plugin>
 

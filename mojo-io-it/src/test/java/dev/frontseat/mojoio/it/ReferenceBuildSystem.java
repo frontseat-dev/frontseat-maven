@@ -81,7 +81,7 @@ final class ReferenceBuildSystem {
 
         Map<String, String> taskHashes = new LinkedHashMap<>();
         List<Outcome> outcomes = new ArrayList<>();
-        for (JsonNode project : graph.get("projects")) {
+        for (JsonNode project : referencedFirst(graph)) {
             String id = project.get("id").asText();
             for (Task task : tasks(project)) {
                 Path dir = root.resolve(task.path());
@@ -96,7 +96,10 @@ final class ReferenceBuildSystem {
                     copyTree(entry, dir);
                     outcomes.add(new Outcome(task.id(), true));
                 } else {
-                    List<String> args = new ArrayList<>(List.of("-pl", id, "-am", "-Dmojoio.only=" + id,
+                    List<String> projects = new ArrayList<>(List.of(id));
+                    project.path("reactorReferences").forEach(r -> projects.add(r.asText()));
+                    List<String> args = new ArrayList<>(List.of("-pl", String.join(",", projects), "-am",
+                            "-Dmojoio.only=" + id,
                             "-Dmojoio.cache.enabled=false", "-Dmojoio.prerequisites=false"));
                     task.executions().forEach(e -> args.add(e.get("invocation").asText()));
                     MavenBuild.Result result = maven.runAllowingFailure(args.toArray(String[]::new));
@@ -118,6 +121,27 @@ final class ReferenceBuildSystem {
      * The graph's ready-made tasks (runTogether groups, Maven 4 phase links as dependsOn). The control
      * mode splits each task into one task per phase, chained, as a naive orchestrator would.
      */
+    /** The graph's projects, each after the reactor projects it references (Maven's order does not know them all). */
+    private static List<JsonNode> referencedFirst(JsonNode graph) {
+        Map<String, JsonNode> byId = new LinkedHashMap<>();
+        graph.get("projects").forEach(p -> byId.put(p.get("id").asText(), p));
+        List<JsonNode> order = new ArrayList<>();
+        java.util.Set<String> visited = new java.util.HashSet<>();
+        for (String id : byId.keySet()) {
+            visit(id, byId, visited, order);
+        }
+        return order;
+    }
+
+    private static void visit(String id, Map<String, JsonNode> byId, java.util.Set<String> visited, List<JsonNode> order) {
+        JsonNode p = byId.get(id);
+        if (p == null || !visited.add(id)) {
+            return;
+        }
+        p.path("reactorReferences").forEach(r -> visit(r.asText(), byId, visited, order));
+        order.add(p);
+    }
+
     private List<Task> tasks(JsonNode project) {
         Map<String, JsonNode> executions = new LinkedHashMap<>();
         project.get("executions").forEach(e -> executions.put(e.get("id").asText(), e));

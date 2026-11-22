@@ -40,6 +40,41 @@ class ProjectStateTest {
         System.clearProperty(name);
     }
 
+    /** Holds a context of its own, as Eclipse Tycho's ReactorProject does. */
+    public static final class ContextOwner {
+        private final java.util.Map<String, Object> context = new java.util.HashMap<>();
+
+        public void setContextValue(String key, Object value) {
+            context.put(key, value);
+        }
+    }
+
+    /** Mojos that hand text to later ones through the project context, directly or nested (Tycho). */
+    @Test
+    void contextValueHandoffsAreRecordedAndReplayed() throws Exception {
+        MavenProject project = project();
+        ContextOwner owner = new ContextOwner();
+        project.setContextValue("tycho.reactor-project.12345", owner);
+        ProjectState before = ProjectState.capture(project, false);
+        project.setContextValue("plain", "/work/p/target/x");
+        owner.setContextValue("DeclarativeServicesMojoHeader", "OSGI-INF/a.xml");
+        owner.setContextValue("someObject", new Object()); // not text: not recorded
+        List<CacheEntry.StateRecord> diff = before.diff(ProjectState.capture(project, false), n);
+        String nested = "@" + ContextOwner.class.getName() + "#DeclarativeServicesMojoHeader";
+        assertEquals(List.of(
+                new CacheEntry.StateRecord("contextValue", nested, "OSGI-INF/a.xml"),
+                new CacheEntry.StateRecord("contextValue", "plain", "@@BASEDIR@@/target/x")), diff);
+
+        // Another JVM: the owner is under another key; the record names it by class.
+        MavenProject replayed = project();
+        ContextOwner other = new ContextOwner();
+        replayed.setContextValue("tycho.reactor-project.67890", other);
+        ProjectState.apply(diff, replayed, n, null);
+        assertEquals("/work/p/target/x", replayed.getContextValue("plain"));
+        assertEquals("OSGI-INF/a.xml", other.context.get("DeclarativeServicesMojoHeader"));
+        assertTrue(diff.stream().allMatch(r -> ProjectState.holds(r, replayed, n)));
+    }
+
     @Test
     void jvmPropertiesAreNotState() throws Exception {
         MavenProject project = project();

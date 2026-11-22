@@ -131,11 +131,15 @@ class ExternalBuildSystemIT {
                 .readTree(build.dir().resolve("graph.json").toFile());
         List<String> compileDependsOn = new java.util.ArrayList<>();
         List<String> testDependsOn = new java.util.ArrayList<>();
+        List<String> validateDependsOn = new java.util.ArrayList<>();
         for (com.fasterxml.jackson.databind.JsonNode p : graph.get("projects")) {
             if (p.get("id").asText().equals("com.example.samples:b")) {
                 for (com.fasterxml.jackson.databind.JsonNode t : p.get("tasks")) {
                     if (t.get("name").asText().equals("compile")) {
                         t.get("dependsOn").forEach(d -> compileDependsOn.add(d.asText()));
+                    }
+                    if (t.get("name").asText().equals("validate")) {
+                        t.get("dependsOn").forEach(d -> validateDependsOn.add(d.asText()));
                     }
                     if (t.get("name").asText().equals("test")) {
                         t.get("dependsOn").forEach(d -> testDependsOn.add(d.asText()));
@@ -148,10 +152,29 @@ class ExternalBuildSystemIT {
         assertTrue(compileDependsOn.contains("com.example.samples:a:package"),
                 "a test-jar needs the upstream project packaged: " + compileDependsOn);
 
-        assertTrue(compileDependsOn.contains("com.example.samples:tools:package"),
-                "a plugin dependency built in this reactor has to be packaged: " + compileDependsOn);
+        // antrun runs in validate, next to dependency:build-classpath, which can't be cached: those
+        // get a task of their own before the compile stage.
+        assertTrue(validateDependsOn.contains("com.example.samples:tools:package"),
+                "a plugin dependency built in this reactor has to be packaged: " + validateDependsOn);
+        assertTrue(compileDependsOn.contains("com.example.samples:b:validate"), compileDependsOn.toString());
         assertTrue(testDependsOn.contains("com.example.samples:d:compile"),
                 "the runtime dependency of a dependency is there when tests run: " + testDependsOn);
+
+        // c names tools only in plugin configuration: its tasks wait for tools, and the build system
+        // is told to select it (-pl), as Maven's -am would not.
+        for (com.fasterxml.jackson.databind.JsonNode p : graph.get("projects")) {
+            if (p.get("id").asText().equals("com.example.samples:c")) {
+                assertEquals("[\"com.example.samples:tools\"]", p.get("configurationReferences").toString());
+                List<String> refs = new java.util.ArrayList<>();
+                p.get("reactorReferences").forEach(r -> refs.add(r.asText()));
+                assertTrue(refs.containsAll(List.of("com.example.samples:tools", "com.example.samples:d")), refs.toString());
+                for (com.fasterxml.jackson.databind.JsonNode t : p.get("tasks")) {
+                    List<String> deps = new java.util.ArrayList<>();
+                    t.get("dependsOn").forEach(d -> deps.add(d.asText()));
+                    assertTrue(deps.stream().anyMatch(d -> d.startsWith("com.example.samples:tools:")), t + "");
+                }
+            }
+        }
 
         List<ReferenceBuildSystem.Outcome> cold = new ReferenceBuildSystem(build, buildSystemCache, "stage").build("verify");
         assertTrue(cold.stream().noneMatch(ReferenceBuildSystem.Outcome::hit), cold.toString());

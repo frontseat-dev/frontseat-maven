@@ -92,4 +92,21 @@ class PluginIoReaderTest {
     private static List<PluginIo> read(String xml) {
         return PluginIoReader.read(new ByteArrayInputStream(xml.getBytes(StandardCharsets.UTF_8)), "test");
     }
+
+    @Test
+    void readsTheFilesABuildExtensionLoads() {
+        String xml = """
+                <plugin-io xmlns="urn:mojo-io:plugin-io:1.0">
+                  <plugin groupId="org.eclipse.tycho" artifactId="tycho-maven-plugin">
+                    <projectLoad>
+                      META-INF/MANIFEST.MF, build.properties
+                      *.target
+                    </projectLoad>
+                  </plugin>
+                </plugin-io>
+                """;
+        PluginIo plugin = PluginIoReader.read(new ByteArrayInputStream(xml.getBytes(StandardCharsets.UTF_8)), "test").get(0);
+        assertEquals(List.of("META-INF/MANIFEST.MF", "build.properties", "*.target"), plugin.projectLoad());
+        assertTrue(plugin.mojos().isEmpty());
+    }
 }

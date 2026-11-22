@@ -31,6 +31,7 @@ public class MojoIoLifecycleParticipant extends AbstractMavenLifecycleParticipan
 
     @Override
     public void afterSessionEnd(MavenSession session) throws MavenExecutionException {
+        StateFiles.reset();
         MojoIoConfig config = MojoIoConfig.from(session);
         if (!config.enabled()) {
             return;
