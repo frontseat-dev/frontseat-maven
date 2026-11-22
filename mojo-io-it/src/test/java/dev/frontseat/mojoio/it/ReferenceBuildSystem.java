@@ -25,8 +25,10 @@ import java.util.stream.Stream;
  * <ul>
  *   <li>a task = the executions of one project bound to one phase, or sharing a {@code runTogether}
  *       group (a phase with its pre-/post- or before:/after: hooks);</li>
- *   <li>task hash = fingerprints + declared file inputs + poms + external dependencies + hashes of the
- *       upstream projects' tasks (classpath) + the previous task of the same project;</li>
+ *   <li>tasks and their dependencies come ready-made from the graph ({@code tasks}: runTogether groups,
+ *       Maven 4 phase links), so e.g. app's compile depends on lib-core's compile, not its tests;</li>
+ *   <li>task hash = fingerprints + declared file inputs + poms + external dependencies + the hashes of the
+ *       tasks it depends on;</li>
  *   <li>hit = copy the stored outputs and state files back; miss = run the task, store them.</li>
  * </ul>
  */
@@ -43,11 +45,7 @@ final class ReferenceBuildSystem {
         }
     }
 
-    private record Task(String project, String path, String phase, List<JsonNode> executions) {
-        String id() {
-            return project + ":" + phase;
-        }
-    }
+    private record Task(String id, String path, List<JsonNode> executions, List<String> dependsOn) {}
 
     private final MavenBuild maven;
     private final Path root;
@@ -70,14 +68,17 @@ final class ReferenceBuildSystem {
         maven.run(goal, "-Dmojoio.graph.output=graph.json");
         JsonNode graph = new ObjectMapper().readTree(root.resolve("graph.json").toFile());
 
-        Map<String, List<String>> projectHashes = new LinkedHashMap<>();
+        Map<String, String> taskHashes = new LinkedHashMap<>();
         List<Outcome> outcomes = new ArrayList<>();
         for (JsonNode project : graph.get("projects")) {
             String id = project.get("id").asText();
-            String previous = "";
             for (Task task : tasks(project)) {
                 Path dir = root.resolve(task.path());
-                String hash = hash(task, project, dir, projectHashes, previous);
+                StringBuilder upstream = new StringBuilder();
+                for (String dep : task.dependsOn()) {
+                    upstream.append(dep).append('=').append(taskHashes.get(dep)).append(';');
+                }
+                String hash = hash(task, project, dir, upstream.toString());
                 boolean cacheable = task.executions().stream().allMatch(e -> e.get("cacheable").asBoolean());
                 Path entry = cache.resolve(hash);
                 if (cacheable && Files.isDirectory(entry)) {
@@ -96,28 +97,41 @@ final class ReferenceBuildSystem {
                     }
                     outcomes.add(new Outcome(task.id(), false));
                 }
-                projectHashes.computeIfAbsent(id, k -> new ArrayList<>()).add(hash);
-                previous = hash;
+                taskHashes.put(task.id(), hash);
             }
         }
         return outcomes;
     }
 
+    /**
+     * The graph's ready-made tasks (runTogether groups, Maven 4 phase links as dependsOn). The control
+     * mode splits each task into one task per phase, chained, as a naive orchestrator would.
+     */
     private List<Task> tasks(JsonNode project) {
-        Map<String, Task> byPhase = new LinkedHashMap<>();
-        for (JsonNode e : project.get("executions")) {
-            JsonNode together = e.get("runTogether");
-            String phase = respectRunTogether && together != null && !together.isNull()
-                    ? together.asText() : e.get("phase").asText();
-            byPhase.computeIfAbsent(phase, p -> new Task(project.get("id").asText(), project.get("path").asText(),
-                    p, new ArrayList<>())).executions().add(e);
+        Map<String, JsonNode> executions = new LinkedHashMap<>();
+        project.get("executions").forEach(e -> executions.put(e.get("id").asText(), e));
+        List<Task> result = new ArrayList<>();
+        for (JsonNode t : project.get("tasks")) {
+            List<String> dependsOn = new ArrayList<>(texts(t.get("dependsOn")));
+            List<JsonNode> members = new ArrayList<>();
+            t.get("executions").forEach(x -> members.add(executions.get(x.asText())));
+            if (respectRunTogether) {
+                result.add(new Task(t.get("id").asText(), project.get("path").asText(), members, dependsOn));
+                continue;
+            }
+            Map<String, List<JsonNode>> byPhase = new LinkedHashMap<>();
+            members.forEach(m -> byPhase.computeIfAbsent(m.get("canonicalPhase").asText(), k -> new ArrayList<>()).add(m));
+            for (Map.Entry<String, List<JsonNode>> e : byPhase.entrySet()) {
+                String id = project.get("id").asText() + ":" + e.getKey();
+                result.add(new Task(id, project.get("path").asText(), e.getValue(), dependsOn));
+                dependsOn = List.of(id);
+            }
         }
-        return new ArrayList<>(byPhase.values());
+        return result;
     }
 
-    private String hash(Task task, JsonNode project, Path dir, Map<String, List<String>> projectHashes,
-                        String previous) throws IOException {
-        StringBuilder sb = new StringBuilder(task.id()).append("|prev=").append(previous);
+    private String hash(Task task, JsonNode project, Path dir, String upstream) throws IOException {
+        StringBuilder sb = new StringBuilder(task.id()).append("|deps=").append(upstream);
         for (JsonNode pom : project.get("poms")) {
             sb.append("|pom=").append(contentHash(resolve(pom.asText(), dir), List.of(), List.of()));
         }
@@ -132,11 +146,7 @@ final class ReferenceBuildSystem {
                                     texts(in.get("excludes"))));
                         }
                     }
-                    case "classpath" -> {
-                        for (JsonNode upstream : project.get("dependsOn")) {
-                            sb.append("|up=").append(projectHashes.getOrDefault(upstream.asText(), List.of()));
-                        }
-                    }
+                    case "classpath" -> { } // covered by the task's dependsOn (upstream task hashes)
                     default -> sb.append("|v=").append(in.get("value"));
                 }
             }
@@ -147,13 +157,27 @@ final class ReferenceBuildSystem {
     private void store(Task task, Path dir, Path entry) throws IOException {
         Path tmp = entry.resolveSibling(entry.getFileName() + ".tmp");
         for (JsonNode e : task.executions()) {
+            Path state = resolve(e.get("stateFile").asText(), dir);
             for (JsonNode out : e.get("outputs")) {
+                if (out.path("observed").asBoolean(false)) {
+                    // Known only now: the state file lists exactly what was written.
+                    if (Files.isRegularFile(state)) {
+                        for (dev.frontseat.mojoio.spec.StateChange c : dev.frontseat.mojoio.spec.StateFile.read(state).changes()) {
+                            if (c.kind().equals("output")) {
+                                Path f = Path.of(c.value().replace("@@BASEDIR@@", dir.toString()));
+                                if (Files.isRegularFile(f)) {
+                                    copy(f, tmp.resolve(dir.relativize(f)));
+                                }
+                            }
+                        }
+                    }
+                    continue;
+                }
                 Path p = resolve(out.get("path").asText(), dir);
                 for (Path f : files(p, texts(out.get("includes")), texts(out.get("excludes")))) {
                     copy(f, tmp.resolve(dir.relativize(f)));
                 }
             }
-            Path state = resolve(e.get("stateFile").asText(), dir);
             if (Files.isRegularFile(state)) {
                 copy(state, tmp.resolve(dir.relativize(state)));
             }

@@ -82,6 +82,16 @@ public final class Outputs {
     }
 
     /**
+     * Whatever the mojo writes in the build directory while it runs (patterns relative to it). For mojos
+     * that run code with hooks of its own: tests, agents such as JaCoCo writing coverage inside the test
+     * JVM, forked tools. Measured from a before/after snapshot of the module.
+     */
+    public static OutputSpec observed(List<String> includes, List<String> excludes) {
+        return ctx -> List.of(new ResolvedOutput("observed",
+                Path.of(ctx.project().getBuild().getDirectory()).toAbsolutePath().normalize(), includes, excludes, true));
+    }
+
+    /**
      * Coverage files written by a {@code -javaagent:...=destfile=...} in the mojo's {@code argLine}
      * (JaCoCo). The test run writes them, so they are outputs of the test execution.
      */

@@ -41,8 +41,8 @@ final class CacheKeyCalculator {
 
     /** The cache's view of a resolved input: content, not timestamps or absolute locations. */
     static String hash(ExecutionContext ctx, ResolvedInput input) {
-        java.util.function.UnaryOperator<byte[]> filter = ctx.normalizer().stamps().isEmpty() ? null
-                : ctx.normalizer().stamps()::tokenizeContent;
+        dev.frontseat.mojoio.cache.ContentFilter filter = ctx.normalizer().stamps().isEmpty() ? null
+                : ctx.normalizer().stamps().contentFilter();
         return switch (input.kind()) {
             case VALUE -> input.value() == null ? "null" : input.value();
             case CLASSPATH -> {
@@ -55,7 +55,13 @@ final class CacheKeyCalculator {
             case FILES -> {
                 List<String> parts = new ArrayList<>();
                 for (Path p : input.paths()) {
-                    parts.add(ctx.normalizer().normalize(p.toString()) + " " + filesHash(p, input, filter));
+                    String h = filesHash(p, input, filter);
+                    if (h.equals(FileTrees.ABSENT)) {
+                        // A path with no content contributes nothing: whether a source root that does not
+                        // exist yet is listed depends on mojo order (e.g. replayed state), not on content.
+                        continue;
+                    }
+                    parts.add(ctx.normalizer().normalize(p.toString()) + " " + h);
                 }
                 yield String.join(";", parts);
             }
@@ -67,7 +73,7 @@ final class CacheKeyCalculator {
         return Hashing.sha256(key + "|stamps=" + stamps.values());
     }
 
-    private static String filesHash(Path p, ResolvedInput input, java.util.function.UnaryOperator<byte[]> filter) {
+    private static String filesHash(Path p, ResolvedInput input, dev.frontseat.mojoio.cache.ContentFilter filter) {
         if (input.includes().isEmpty() && input.excludes().isEmpty()) {
             return FileTrees.hash(p, filter);
         }
@@ -77,6 +83,9 @@ final class CacheKeyCalculator {
             if (AntPattern.selected(rel, input.includes(), input.excludes())) {
                 sb.append(rel).append('=').append(FileTrees.hash(f, filter)).append(';');
             }
+        }
+        if (sb.length() == 0) {
+            return FileTrees.ABSENT;
         }
         return Hashing.sha256("includes=" + input.includes() + " excludes=" + input.excludes() + " " + sb);
     }

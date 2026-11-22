@@ -74,6 +74,42 @@ Limits: changes are detected by size and modification time, so a rewrite with id
 the filesystem's timestamp resolution goes unnoticed. Writes outside the module directory aren't
 seen.
 
+### Hooks
+
+A *hook* is any way a mojo affects other mojos or the build outside its own declared outputs. Caching
+one mojo at a time, or one task at a time in an external build system, only works if every hook is
+carried across. There are five kinds, and each has one generic mechanism:
+
+| Hook | Examples | Mechanism |
+|---|---|---|
+| **Process lifetime:** setup and teardown around a phase | `jetty:start`/`stop`, `exec:java` servers, docker start/stop | Maven 4 `before:`/`after:` hooks and Maven 3 `pre-`/`post-` phases are grouped with their phase as `runTogether`. A build system runs each group in one Maven invocation (`HookBracketsIT`, `Maven4HooksIT`). |
+| **Project-property handoff** | `jacoco:prepare-agent` → `argLine`, buildnumber, port reservation | Recorded and replayed state. Surefire/failsafe late replacement (`@{argLine}`) is substituted in the key, so the key sees what the mojo will see. |
+| **System-property handoff** | `properties:set-system-properties` | Recorded and replayed like project properties. JVM/runtime prefixes (`java.`, `os.`, `user.`, …) are ignored. |
+| **Side outputs written inside another mojo's process** | Agents in the test JVM (JaCoCo `.exec`, profilers), test code writing files | `<observed/>` outputs: everything the mojo writes in the build directory, measured from the before/after snapshot, cached, and listed as `output` records in the state file for external caches. |
+| **Model and lifecycle hooks of extensions** | flatten, CI-friendly versions, `@Execute` forks | Extensions run in every Maven process, so every task sees them. Mojos that fork a lifecycle are not cacheable. |
+
+#### Maven 4
+
+In Maven 4, `before:`/`after:` hooks exist for every phase, and Maven 3's phases are aliases of them
+(`process-resources` = `after:resources`, `process-classes` = `after:compile`, `prepare-package` =
+`before:package`, `pre-integration-test` = `before:integration-test`). Executions report the hook name.
+The graph therefore carries `canonicalPhase` (the Maven 3 name) and computes `runTogether` from the
+Maven 4 form on both versions, so task names and groups are identical on Maven 3.9 and 4.
+
+A hook is grouped with its phase only when both have executions bound (a lone `after:resources` is just
+a task). That also keeps in-place post-processing together, such as an `after:compile` bytecode
+enhancer that rewrites the compiler's classes.
+
+The concurrent builder (`-b concurrent`) calls the execution strategy once per lifecycle step, with
+partial plans. State is replayed before the first step, so an execution that runs later in the same
+build already finds its own earlier changes in place, and its diff misses them. The strategy remembers
+what it replayed and merges back the records that still hold after the execution runs
+(`Maven4HooksIT.concurrentBuilderKeepsRecordedState`). Replay can also add an input path that doesn't
+exist yet (the compiler's generated-sources root) before a key is computed. So paths without content
+contribute nothing to keys, and the key doesn't depend on mojo order. Separately, in 4.0.0-rc-7 the concurrent builder
+misorders Maven 3-style bindings even without mojo-io: it builds no jars and runs `jacoco:report` before
+the tests. That's a Maven issue, not ours.
+
 ### Path normalization
 
 `@@BASEDIR@@` (the module), `@@ROOT@@` (the multi-module root) and `@@M2REPO@@` (the local repository)

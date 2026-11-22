@@ -18,6 +18,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import javax.inject.Inject;
 import javax.inject.Named;
 import javax.inject.Singleton;
@@ -43,6 +44,7 @@ public class TaskGraphCollector {
     private final RuntimeInformation runtime;
     private final DependencyResolution dependencies;
     private final Map<MavenSession, Map<String, Object>> graphs = new java.util.WeakHashMap<>();
+    private final Map<MavenSession, LifecycleModel> models = new java.util.WeakHashMap<>();
 
     @Inject
     public TaskGraphCollector(DescriptorRegistry registry, RuntimeInformation runtime,
@@ -54,6 +56,7 @@ public class TaskGraphCollector {
 
     synchronized void add(MavenSession session, MavenProject project, List<MojoExecution> executions) {
         Map<String, Object> graph = graphs.computeIfAbsent(session, s -> newGraph(s));
+        LifecycleModel model = models.computeIfAbsent(session, LifecycleModel::load);
         PathNormalizer normalizer = MojoIoExecutionStrategy.normalizer(session, project);
         Path root = root(session);
 
@@ -68,6 +71,20 @@ public class TaskGraphCollector {
             dependsOn.add(upstream.getGroupId() + ":" + upstream.getArtifactId());
         }
         p.put("dependsOn", dependsOn);
+        // Reactor dependencies with their scope: what Maven 4's dependencies-links point at.
+        java.util.Set<String> reactor = new java.util.HashSet<>();
+        session.getProjects().forEach(rp -> reactor.add(rp.getGroupId() + ":" + rp.getArtifactId()));
+        List<Object> reactorDependencies = new ArrayList<>();
+        for (org.apache.maven.model.Dependency d : project.getDependencies()) {
+            String id = d.getGroupId() + ":" + d.getArtifactId();
+            if (reactor.contains(id)) {
+                Map<String, Object> dep = new LinkedHashMap<>();
+                dep.put("id", id);
+                dep.put("scope", d.getScope() == null ? "compile" : d.getScope());
+                reactorDependencies.add(dep);
+            }
+        }
+        p.put("dependencies", reactorDependencies);
         List<String> poms = new ArrayList<>();
         for (MavenProject cur = project; cur != null && cur.getFile() != null; cur = cur.getParent()) {
             Path pom = cur.getFile().toPath().toAbsolutePath().normalize();
@@ -79,21 +96,24 @@ public class TaskGraphCollector {
         p.put("poms", poms);
         p.put("externalDependencies", dependencies.externalDependencies(project, session));
 
-        // Phases that have hook phases bound in this project: Maven 3's pre-/post- brackets and
-        // Maven 4's before:/after: hooks. A hook and its phase share process-local state (a started
-        // server, a reserved port), so they must run in one Maven invocation.
-        java.util.Set<String> hooked = new java.util.HashSet<>();
+        // A phase and its hooks (Maven 4 before:/after:; Maven 3's generate-/process-/pre-/post- phases are
+        // aliases of those hooks) share process-local state, so they must run in one Maven invocation.
+        // Computed on the Maven 4 form for both versions, so the graph is the same on both.
+        Map<String, Integer> members = new java.util.HashMap<>();
         for (MojoExecution m : executions) {
-            String phase = m.getLifecyclePhase();
-            if (phase != null && !hookBase(phase).equals(phase)) {
-                hooked.add(hookBase(phase));
+            if (m.getLifecyclePhase() != null) {
+                members.merge(hookBase(hookForm(model, m.getLifecyclePhase())), 1, Integer::sum);
             }
         }
         List<Object> list = new ArrayList<>();
         for (MojoExecution m : executions) {
             Map<String, Object> e = execution(session, project, m, normalizer);
             String phase = m.getLifecyclePhase();
-            e.put("runTogether", phase != null && hooked.contains(hookBase(phase)) ? hookBase(phase) : null);
+            String base = phase == null ? null : hookBase(hookForm(model, phase));
+            e.put("canonicalPhase", phase == null ? null : canonicalPhase(model, phase));
+            e.put("lifecyclePhase", phase == null ? null : model.treePhase(phase));
+            e.put("runTogether", base != null && members.get(base) > 1
+                    && (!hookForm(model, phase).equals(base) || hasHookMember(model, executions, base)) ? base : null);
             list.add(e);
         }
         p.put("executions", list);
@@ -103,19 +123,37 @@ public class TaskGraphCollector {
         LOG.info("[mojo-io] GRAPH {}: {} execution(s) described, none run", project.getArtifactId(), list.size());
     }
 
-    /** Maven 3 brackets (clean, integration-test, site) and Maven 4 before:/after: hooks. */
+    /** Maven 4 form of a phase: process-resources -> after:resources, generate-sources -> sources; at:X -> X. */
+    static String hookForm(LifecycleModel model, String phase) {
+        String p = model.aliases().getOrDefault(phase, phase);
+        return p.startsWith("at:") ? p.substring(3) : p;
+    }
+
+    /** Maven 3 name of a phase where one exists (after:resources -> process-resources), else the phase. */
+    static String canonicalPhase(LifecycleModel model, String phase) {
+        String form = hookForm(model, phase);
+        for (Map.Entry<String, String> alias : model.aliases().entrySet()) {
+            if (alias.getValue().equals(form)) {
+                return alias.getKey();
+            }
+        }
+        return form;
+    }
+
+    /** The phase a hook belongs to: before:X / after:X -> X. */
     static String hookBase(String phase) {
         for (String prefix : List.of("before:", "after:")) {
             if (phase.startsWith(prefix)) {
                 return phase.substring(prefix.length());
             }
         }
-        for (String base : List.of("clean", "integration-test", "site")) {
-            if (phase.equals("pre-" + base) || phase.equals("post-" + base)) {
-                return base;
-            }
-        }
         return phase;
+    }
+
+    private static boolean hasHookMember(LifecycleModel model, List<MojoExecution> executions, String base) {
+        return executions.stream().anyMatch(m -> m.getLifecyclePhase() != null
+                && !hookForm(model, m.getLifecyclePhase()).equals(base)
+                && hookBase(hookForm(model, m.getLifecyclePhase())).equals(base));
     }
 
     private Map<String, Object> execution(MavenSession session, MavenProject project, MojoExecution m,
@@ -197,6 +235,10 @@ public class TaskGraphCollector {
         o.put("path", path(n, out.path()));
         o.put("includes", out.includes());
         o.put("excludes", out.excludes());
+        if (out.observed()) {
+            // Known only after the run: the exact files are listed as `output` records in the stateFile.
+            o.put("observed", true);
+        }
         return o;
     }
 
@@ -230,6 +272,9 @@ public class TaskGraphCollector {
         if (graph == null) {
             graph = newGraph(session);
         }
+        LifecycleModel model = models.computeIfAbsent(session, LifecycleModel::load);
+        graph.put("lifecycle", lifecycle(model));
+        addTasks(graph, model);
         try {
             Files.createDirectories(file.getParent());
             Files.writeString(file, Json.write(graph), StandardCharsets.UTF_8);
@@ -237,6 +282,96 @@ public class TaskGraphCollector {
             throw new UncheckedIOException(e);
         }
         LOG.info("[mojo-io] GRAPH written to {}", file);
+    }
+
+    private static Map<String, Object> lifecycle(LifecycleModel model) {
+        Map<String, Object> l = new LinkedHashMap<>();
+        l.put("source", model.source());
+        List<Object> phases = new ArrayList<>();
+        for (LifecycleModel.Phase p : model.phases()) {
+            Map<String, Object> ph = new LinkedHashMap<>();
+            ph.put("name", p.name());
+            ph.put("parent", p.parent());
+            List<Object> links = new ArrayList<>();
+            for (LifecycleModel.Link link : p.links()) {
+                Map<String, Object> lk = new LinkedHashMap<>();
+                lk.put("kind", link.kind());
+                lk.put("type", link.type());
+                if (link.scope() != null) {
+                    lk.put("scope", link.scope());
+                }
+                lk.put("phase", link.phase());
+                links.add(lk);
+            }
+            ph.put("links", links);
+            phases.add(ph);
+        }
+        l.put("phases", phases);
+        l.put("aliases", new java.util.TreeMap<>(model.aliases()));
+        return l;
+    }
+
+    /**
+     * Ready-made tasks per project: executions grouped by runTogether, else canonicalPhase. A task
+     * depends on the previous task of its project and, per dependencies-link of its lifecycle phase, on
+     * the last task of each matching reactor dependency that the link's phase covers (e.g. app's
+     * compile on lib-core's tasks up to "ready", not its tests or packaging).
+     */
+    @SuppressWarnings("unchecked")
+    private static void addTasks(Map<String, Object> graph, LifecycleModel model) {
+        Map<String, List<Map<String, Object>>> tasksByProject = new LinkedHashMap<>();
+        for (Object po : (List<Object>) graph.get("projects")) {
+            Map<String, Object> p = (Map<String, Object>) po;
+            String projectId = (String) p.get("id");
+            Map<String, Map<String, Object>> tasks = new LinkedHashMap<>();
+            for (Object eo : (List<Object>) p.get("executions")) {
+                Map<String, Object> e = (Map<String, Object>) eo;
+                String name = e.get("runTogether") != null ? (String) e.get("runTogether")
+                        : e.get("canonicalPhase") != null ? (String) e.get("canonicalPhase") : (String) e.get("goal");
+                Map<String, Object> t = tasks.computeIfAbsent(name, n -> {
+                    Map<String, Object> task = new LinkedHashMap<>();
+                    task.put("id", projectId + ":" + n);
+                    task.put("name", n);
+                    task.put("lifecyclePhase", e.get("lifecyclePhase"));
+                    task.put("executions", new ArrayList<String>());
+                    task.put("dependsOn", new ArrayList<String>());
+                    return task;
+                });
+                ((List<String>) t.get("executions")).add((String) e.get("id"));
+            }
+            String previous = null;
+            for (Map<String, Object> t : tasks.values()) {
+                List<String> dependsOn = (List<String>) t.get("dependsOn");
+                if (previous != null) {
+                    dependsOn.add(previous);
+                }
+                String phase = (String) t.get("lifecyclePhase");
+                for (LifecycleModel.Link link : phase == null ? List.<LifecycleModel.Link>of() : model.links(phase)) {
+                    if (!link.type().equals("dependencies")) {
+                        continue;
+                    }
+                    Set<String> done = model.doneBy(link.phase());
+                    for (Object d : (List<Object>) p.get("dependencies")) {
+                        Map<String, Object> dep = (Map<String, Object>) d;
+                        if (!LifecycleModel.scopes(link.scope()).contains((String) dep.get("scope"))) {
+                            continue;
+                        }
+                        String last = null;
+                        for (Map<String, Object> ut : tasksByProject.getOrDefault((String) dep.get("id"), List.of())) {
+                            if (done.contains((String) ut.get("lifecyclePhase"))) {
+                                last = (String) ut.get("id");
+                            }
+                        }
+                        if (last != null && !dependsOn.contains(last)) {
+                            dependsOn.add(last);
+                        }
+                    }
+                }
+                previous = (String) t.get("id");
+            }
+            tasksByProject.put(projectId, new ArrayList<>(tasks.values()));
+            p.put("tasks", new ArrayList<>(tasks.values()));
+        }
     }
 
     private static Path root(MavenSession session) {

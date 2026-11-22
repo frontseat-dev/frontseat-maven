@@ -69,6 +69,10 @@ class BasicMultimoduleIT {
                     .resolve("TEST-sample." + (module.equals("app") ? "app.AppTest" : "core.GreeterTest") + ".xml")));
         }
         assertTrue(result.log().contains("Tests run: 2, Failures: 0"), result.log());
+        // surefire is configured with @{argLine}: the key must see the agent JaCoCo put there.
+        String surefireKey = Files.readString(fresh.dir().resolve(
+                "lib-core/target/mojo-io/maven-surefire-plugin-test-default-cli.key.txt"));
+        assertTrue(surefireKey.contains("-javaagent:@@M2REPO@@/org/jacoco"), surefireKey);
 
         // Unchanged inputs: the tests themselves now come from the cache.
         MavenBuild.Result again = fresh.run("surefire:test");

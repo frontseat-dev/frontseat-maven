@@ -31,6 +31,15 @@ final class ProjectState {
     static final String PROPERTY_REMOVED = "propertyRemoved";
     static final String ARTIFACT_FILE = "artifactFile";
     static final String ATTACHED_ARTIFACT = "attachedArtifact";
+    static final String SYSTEM_PROPERTY = "systemProperty";
+    static final String SYSTEM_PROPERTY_REMOVED = "systemPropertyRemoved";
+    /** Not a project change: a file the execution wrote that an observed output covers (see Outputs#observed). */
+    static final String OUTPUT = "output";
+
+    /** JVM and Maven runtime properties: they change for reasons unrelated to the mojo. */
+    private static final java.util.List<String> JVM_PREFIXES = java.util.List.of(
+            "java.", "jdk.", "sun.", "os.", "user.", "file.", "line.", "path.", "awt.", "javax.", "jna.",
+            "maven.", "classworlds.", "library.", "native.", "stdout.", "stderr.", "socksProxy", "http.", "https.");
 
     private final List<String> compileSourceRoots;
     private final List<String> testCompileSourceRoots;
@@ -38,10 +47,11 @@ final class ProjectState {
     private final List<String> testResources;
     private final Map<String, String> properties;
     private final String artifactFile;
+    private final Map<String, String> systemProperties;
     /** type:classifier -> file, in attachment order. */
     private final Map<String, String> attachedArtifacts;
 
-    private ProjectState(MavenProject project) {
+    private ProjectState(MavenProject project, boolean trackSystemProperties) {
         compileSourceRoots = new ArrayList<>(project.getCompileSourceRoots());
         testCompileSourceRoots = new ArrayList<>(project.getTestCompileSourceRoots());
         resources = describe(project.getResources());
@@ -50,6 +60,13 @@ final class ProjectState {
         project.getProperties().forEach((k, v) -> properties.put(String.valueOf(k), String.valueOf(v)));
         File file = project.getArtifact() == null ? null : project.getArtifact().getFile();
         artifactFile = file == null ? null : file.getAbsolutePath();
+        systemProperties = new TreeMap<>();
+        (trackSystemProperties ? System.getProperties() : new java.util.Properties()).forEach((k, v) -> {
+            String name = String.valueOf(k);
+            if (JVM_PREFIXES.stream().noneMatch(name::startsWith)) {
+                systemProperties.put(name, String.valueOf(v));
+            }
+        });
         attachedArtifacts = new LinkedHashMap<>();
         for (Artifact a : project.getAttachedArtifacts()) {
             attachedArtifacts.put(attachmentId(a.getType(), a.getClassifier()),
@@ -58,7 +75,11 @@ final class ProjectState {
     }
 
     static ProjectState capture(MavenProject project) {
-        return new ProjectState(project);
+        return new ProjectState(project, true);
+    }
+
+    static ProjectState capture(MavenProject project, boolean systemProperties) {
+        return new ProjectState(project, systemProperties);
     }
 
     /** Normalized records that turn {@code this} into {@code after}. */
@@ -88,6 +109,16 @@ final class ProjectState {
         }
         if (!Objects.equals(artifactFile, after.artifactFile)) {
             records.add(new StateRecord(ARTIFACT_FILE, "", n.normalize(after.artifactFile)));
+        }
+        after.systemProperties.forEach((k, v) -> {
+            if (!Objects.equals(systemProperties.get(k), v)) {
+                records.add(new StateRecord(SYSTEM_PROPERTY, k, n.normalize(v)));
+            }
+        });
+        for (String k : systemProperties.keySet()) {
+            if (!after.systemProperties.containsKey(k)) {
+                records.add(new StateRecord(SYSTEM_PROPERTY_REMOVED, k, null));
+            }
         }
         for (Map.Entry<String, String> e : after.attachedArtifacts.entrySet()) {
             if (!attachedArtifacts.containsKey(e.getKey())) {
@@ -120,9 +151,30 @@ final class ProjectState {
                 case PROPERTY_REMOVED -> project.getProperties().remove(r.name());
                 case ARTIFACT_FILE -> project.getArtifact().setFile(value == null ? null : new File(value));
                 case ATTACHED_ARTIFACT -> attach(project, r.name(), value, helper);
+                case SYSTEM_PROPERTY -> System.setProperty(r.name(), value);
+                case SYSTEM_PROPERTY_REMOVED -> System.clearProperty(r.name());
+                case OUTPUT -> { } // informational, for external caches
                 default -> throw new IllegalStateException("Unknown state record kind " + r.kind());
             }
         }
+    }
+
+    /** Whether {@code r}'s effect is (still) visible on {@code project}. */
+    static boolean holds(StateRecord r, MavenProject project, PathNormalizer n) {
+        String value = n.denormalize(r.value());
+        return switch (r.kind()) {
+            case COMPILE_SOURCE_ROOT -> project.getCompileSourceRoots().contains(value);
+            case TEST_COMPILE_SOURCE_ROOT -> project.getTestCompileSourceRoots().contains(value);
+            case PROPERTY -> Objects.equals(project.getProperties().getProperty(r.name()), value);
+            case PROPERTY_REMOVED -> !project.getProperties().containsKey(r.name());
+            case ARTIFACT_FILE -> project.getArtifact() != null && project.getArtifact().getFile() != null
+                    && project.getArtifact().getFile().getAbsolutePath().equals(value);
+            case ATTACHED_ARTIFACT -> project.getAttachedArtifacts().stream().anyMatch(a ->
+                    attachmentId(a.getType(), a.getClassifier()).equals(r.name()));
+            case SYSTEM_PROPERTY -> Objects.equals(System.getProperty(r.name()), value);
+            case SYSTEM_PROPERTY_REMOVED -> System.getProperty(r.name()) == null;
+            default -> false;
+        };
     }
 
     static String attachmentId(String type, String classifier) {

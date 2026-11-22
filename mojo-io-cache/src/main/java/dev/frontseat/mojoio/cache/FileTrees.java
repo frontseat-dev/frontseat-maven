@@ -34,7 +34,7 @@ public final class FileTrees {
      * Like {@link #hash(Path)}, with each file's content passed through {@code filter} first (e.g.
      * {@link Stamps#tokenizeContent}); {@code null} hashes raw bytes.
      */
-    public static String hash(Path path, java.util.function.UnaryOperator<byte[]> filter) {
+    public static String hash(Path path, ContentFilter filter) {
         if (Files.isRegularFile(path)) {
             return fileHash(path, filter);
         }
@@ -65,8 +65,15 @@ public final class FileTrees {
     }
 
     /** {@link #hashClasspathEntry(Path)} with content filtering, also applied to archive entries. */
-    public static String hashClasspathEntry(Path path, java.util.function.UnaryOperator<byte[]> filter) {
+    public static String hashClasspathEntry(Path path, ContentFilter filter) {
         if (Files.isRegularFile(path) && isArchive(path)) {
+            return memoized(path, "archive", filter, () -> archiveHash(path, filter));
+        }
+        return hash(path, filter);
+    }
+
+    private static String archiveHash(Path path, ContentFilter filter) {
+        {
             try (ZipFile zip = new ZipFile(path.toFile())) {
                 List<? extends ZipEntry> entries = new ArrayList<>(Collections.list(zip.entries()));
                 entries.sort(Comparator.comparing(ZipEntry::getName));
@@ -89,21 +96,54 @@ public final class FileTrees {
                 return Hashing.sha256(path); // not a readable archive after all: fall back to bytes
             }
         }
-        return hash(path, filter);
     }
 
-    private static String fileHash(Path file, java.util.function.UnaryOperator<byte[]> filter) {
-        if (filter == null) {
-            return Hashing.sha256(file);
-        }
-        try {
-            if (Files.size(file) > 16L * 1024 * 1024) {
+    private static String fileHash(Path file, ContentFilter filter) {
+        return memoized(file, "file", filter, () -> {
+            if (filter == null) {
                 return Hashing.sha256(file);
             }
-            return Hashing.sha256(filter.apply(Files.readAllBytes(file)));
+            try {
+                if (Files.size(file) > 16L * 1024 * 1024) {
+                    return Hashing.sha256(file);
+                }
+                return Hashing.sha256(filter.apply(Files.readAllBytes(file)));
+            } catch (IOException e) {
+                throw new UncheckedIOException("Cannot hash " + file, e);
+            }
+        });
+    }
+
+    /**
+     * Content hashes, memoized by path, size and modification time (and filter): a reactor hashes the
+     * same upstream jars and class directories for every downstream module and mojo. Lives as long as
+     * the JVM, so a Maven Daemon (mvnd) also reuses it across builds. A rewrite that keeps both size and
+     * modification time would be missed; filesystems record modification times in nanoseconds.
+     */
+    private static final java.util.concurrent.ConcurrentHashMap<String, String> MEMO =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    private static String memoized(Path file, String kind, ContentFilter filter,
+                                   java.util.function.Supplier<String> compute) {
+        String key;
+        try {
+            java.nio.file.attribute.BasicFileAttributes attrs =
+                    Files.readAttributes(file, java.nio.file.attribute.BasicFileAttributes.class);
+            key = kind + '|' + (filter == null ? "raw" : filter.id()) + '|' + attrs.size() + '|'
+                    + attrs.lastModifiedTime().to(java.util.concurrent.TimeUnit.NANOSECONDS) + '|'
+                    + file.toAbsolutePath().normalize();
         } catch (IOException e) {
-            throw new UncheckedIOException("Cannot hash " + file, e);
+            return compute.get();
         }
+        String hash = MEMO.get(key);
+        if (hash == null) {
+            if (MEMO.size() > 500_000) {
+                MEMO.clear();
+            }
+            hash = compute.get();
+            MEMO.put(key, hash);
+        }
+        return hash;
     }
 
     private static boolean isArchive(Path path) {

@@ -82,6 +82,22 @@ public final class Stamps {
         return r;
     }
 
+    /** {@link #tokenizeContent} as a hashing filter, identified by the stamp values. */
+    public ContentFilter contentFilter() {
+        String id = "stamps:" + values;
+        return new ContentFilter() {
+            @Override
+            public byte[] apply(byte[] content) {
+                return tokenizeContent(content);
+            }
+
+            @Override
+            public String id() {
+                return id;
+            }
+        };
+    }
+
     public boolean occursIn(byte[] content) {
         for (String v : values.values()) {
             if (Bytes.indexOf(content, v.getBytes(StandardCharsets.UTF_8), 0) >= 0) {

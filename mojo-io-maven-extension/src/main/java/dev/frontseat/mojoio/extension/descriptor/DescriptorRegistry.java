@@ -45,7 +45,8 @@ public class DescriptorRegistry {
     private static final Logger LOG = LoggerFactory.getLogger(DescriptorRegistry.class);
 
     private final Map<String, MojoCacheDescriptor> builtin;
-    private final Map<Path, Map<String, MojoCacheDescriptor>> projectDeclarations = new ConcurrentHashMap<>();
+    /** Keyed by root and a stamp of the files, so a long-lived daemon (mvnd) sees edited overrides. */
+    private final Map<String, Map<String, MojoCacheDescriptor>> projectDeclarations = new ConcurrentHashMap<>();
     private final Map<String, Map<String, MojoCacheDescriptor>> pluginDeclarations = new ConcurrentHashMap<>();
 
     public DescriptorRegistry() {
@@ -72,11 +73,21 @@ public class DescriptorRegistry {
         if (root == null) {
             return Map.of();
         }
-        return projectDeclarations.computeIfAbsent(root, r -> {
-            Path dir = r.resolve(PROJECT_DIRECTORY);
-            if (!Files.isDirectory(dir)) {
-                return Map.of();
+        Path dir = root.resolve(PROJECT_DIRECTORY);
+        if (!Files.isDirectory(dir)) {
+            return Map.of();
+        }
+        StringBuilder stamp = new StringBuilder(root.toString());
+        try (Stream<Path> files = Files.list(dir)) {
+            for (Path f : files.sorted().toList()) {
+                stamp.append('|').append(f.getFileName()).append(':').append(Files.getLastModifiedTime(f).toMillis())
+                        .append(':').append(Files.size(f));
             }
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+        Path r = root;
+        return projectDeclarations.computeIfAbsent(stamp.toString(), k -> {
             try (Stream<Path> files = Files.list(dir)) {
                 Map<String, MojoCacheDescriptor> result = new ConcurrentHashMap<>();
                 for (Path f : files.filter(p -> p.toString().endsWith(".xml")).sorted().toList()) {

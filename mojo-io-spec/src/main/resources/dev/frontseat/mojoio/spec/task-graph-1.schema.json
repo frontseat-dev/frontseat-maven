@@ -11,7 +11,20 @@
     "workspaceRoot": { "type": "string", "description": "Absolute path that {workspaceRoot} stood for when the graph was written." },
     "maven": { "type": "string", "description": "Maven version that computed the graph." },
     "goals": { "type": "array", "items": { "type": "string" }, "description": "Goals/phases the graph was computed for." },
-    "projects": { "type": "array", "items": { "$ref": "#/$defs/project" } }
+    "projects": { "type": "array", "items": { "$ref": "#/$defs/project" } },
+    "lifecycle": {
+      "type": "object",
+      "description": "Maven 4's default lifecycle: the phase tree with its links (read from Maven 4 at run time; a built-in copy of the Maven 4 default on Maven 3) and the Maven 3 -> Maven 4 phase aliases.",
+      "properties": {
+        "source": { "type": "string" },
+        "phases": { "type": "array", "items": { "type": "object", "properties": {
+          "name": { "type": "string" }, "parent": { "type": ["string", "null"] },
+          "links": { "type": "array", "items": { "type": "object", "properties": {
+            "kind": { "enum": ["before", "after"] }, "type": { "enum": ["project", "dependencies", "children"] },
+            "scope": { "type": "string" }, "phase": { "type": "string" } } } } } } },
+        "aliases": { "type": "object", "additionalProperties": { "type": "string" } }
+      }
+    }
   },
   "$defs": {
     "project": {
@@ -24,8 +37,21 @@
         "packaging": { "type": "string" },
         "dependsOn": { "type": "array", "items": { "type": "string" }, "description": "ids of reactor projects this one depends on directly (dependencies, parent, plugins)." },
         "poms": { "type": "array", "items": { "type": "string" }, "description": "This project's pom and its ancestors inside the workspace." },
+        "dependencies": { "type": "array", "items": { "type": "object", "properties": { "id": { "type": "string" }, "scope": { "type": "string" } } }, "description": "Direct reactor dependencies with their Maven scope: what the lifecycle's dependencies-links point at." },
+        "tasks": { "type": "array", "items": { "$ref": "#/$defs/task" }, "description": "Ready-made tasks for build systems, in execution order." },
         "externalDependencies": { "type": "array", "items": { "type": "string" }, "description": "Non-reactor dependencies, collected without resolving files: groupId:artifactId:type[:classifier]:version:scope." },
         "executions": { "type": "array", "items": { "$ref": "#/$defs/execution" }, "description": "In execution order." }
+      }
+    },
+    "task": {
+      "type": "object",
+      "required": ["id", "name", "executions", "dependsOn"],
+      "properties": {
+        "id": { "type": "string", "description": "<project id>:<name>" },
+        "name": { "type": "string", "description": "runTogether group, else canonicalPhase." },
+        "lifecyclePhase": { "type": ["string", "null"], "description": "Phase of the Maven 4 tree the task belongs to." },
+        "executions": { "type": "array", "items": { "type": "string" }, "description": "Execution ids, in order; run them in one invocation." },
+        "dependsOn": { "type": "array", "items": { "type": "string" }, "description": "Task ids: the previous task of the project, and per dependencies-link of the task's phase, the last task of each matching reactor dependency that the link's phase covers." }
       }
     },
     "execution": {
@@ -39,6 +65,8 @@
         "executionId": { "type": "string" },
         "phase": { "type": ["string", "null"], "description": "Lifecycle phase, null for goals invoked directly." },
         "invocation": { "type": "string", "description": "Runs exactly this execution when passed to mvn as a goal (groupId:artifactId:version:goal@executionId)." },
+        "lifecyclePhase": { "type": ["string", "null"], "description": "The Maven 4 lifecycle tree phase the execution belongs to (hooks and Maven 3 aliases resolved)." },
+        "canonicalPhase": { "type": ["string", "null"], "description": "The Maven 3 name of the phase (Maven 4 reports hooks, e.g. after:resources = process-resources); identical across Maven versions." },
         "runTogether": { "type": ["string", "null"], "description": "Executions sharing this value (a phase and its pre-/post- or before:/after: hooks) must run in one Maven invocation: hooks hold process-local state such as a started server." },
         "fingerprint": { "type": ["string", "null"], "description": "Hash of what a build system cannot hash itself: plugin coordinates and dependencies, goal, JDK, evaluated configuration and value inputs. Includes stamp values. Null when not cacheable." },
         "declaredBy": { "type": ["string", "null"], "description": "Source of the plugin-io declaration (project file, plugin jar, built-in), null if undeclared." },
@@ -69,6 +97,7 @@
       "properties": {
         "name": { "type": "string" },
         "path": { "type": "string", "description": "A file, or a directory narrowed by includes/excludes." },
+        "observed": { "type": "boolean", "description": "Known only after the run: the exact files are listed as `output` records in the stateFile." },
         "includes": { "type": "array", "items": { "type": "string" } },
         "excludes": { "type": "array", "items": { "type": "string" } }
       }
