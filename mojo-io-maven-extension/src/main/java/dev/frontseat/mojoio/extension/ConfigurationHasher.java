@@ -3,6 +3,7 @@ package dev.frontseat.mojoio.extension;
 import java.io.File;
 import java.nio.file.Path;
 import java.util.Collection;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
@@ -124,6 +125,33 @@ final class ConfigurationHasher {
             }
             return sorted.toString();
         }
+        if (isMavenObject(value.getClass())) {
+            // The running build itself (session, project, repositories), injected under any parameter
+            // name: not configuration. What the mojo reads through it is what its declaration covers.
+            return "(maven)";
+        }
         throw new NotCacheableException("has unsupported type " + value.getClass().getName());
+    }
+
+    private static final List<String> MAVEN_OBJECTS = List.of(
+            "org.apache.maven.execution.MavenSession", "org.apache.maven.project.MavenProject",
+            "org.apache.maven.plugin.MojoExecution", "org.apache.maven.plugin.descriptor.PluginDescriptor",
+            "org.apache.maven.settings.Settings", "org.apache.maven.artifact.repository.ArtifactRepository",
+            "org.eclipse.aether.RepositorySystemSession", "org.eclipse.aether.repository.RemoteRepository",
+            "org.eclipse.aether.repository.LocalRepository");
+
+    private static boolean isMavenObject(Class<?> type) {
+        if (type == null) {
+            return false;
+        }
+        if (MAVEN_OBJECTS.contains(type.getName())) {
+            return true;
+        }
+        for (Class<?> i : type.getInterfaces()) {
+            if (isMavenObject(i)) {
+                return true;
+            }
+        }
+        return isMavenObject(type.getSuperclass());
     }
 }

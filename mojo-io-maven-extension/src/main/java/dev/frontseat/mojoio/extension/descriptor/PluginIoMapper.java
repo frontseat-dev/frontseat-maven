@@ -23,6 +23,9 @@ final class PluginIoMapper {
         try {
             for (IoDeclaration d : io.inputs()) {
                 b.input(input(d));
+                if (d.kind().equals("reactorModels")) {
+                    b.reactorWide(true);
+                }
             }
             for (IoDeclaration d : io.outputs()) {
                 b.output(output(d));
@@ -47,7 +50,12 @@ final class PluginIoMapper {
                     ? Inputs.filesAt(d.required("expression"))
                     : Inputs.files(d.required("parameter"));
             case "classpath" -> Inputs.classpath(d.required("parameter"), d.attribute("excludeParameter").orElse(null));
-            case "testClasspath" -> Inputs.testClasspath();
+            case "testClasspath" -> Inputs.testClasspath(!"false".equals(d.attribute("ownOutputs").orElse("true")));
+            case "projectFiles" -> Inputs.projectFiles(split(d.attribute("excludes").orElse("")));
+            case "projectModel" -> Inputs.projectModel();
+            case "reactorModels" -> Inputs.reactorModels();
+            case "mavenVersion" -> Inputs.mavenVersion();
+            case "sessionGoals" -> Inputs.sessionGoals();
             case "resources" -> d.attribute("expression").isPresent()
                     ? Inputs.resourcesAt(d.required("expression"))
                     : Inputs.resources(d.required("parameter"));

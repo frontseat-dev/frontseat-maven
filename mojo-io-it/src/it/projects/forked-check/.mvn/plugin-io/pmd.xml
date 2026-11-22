@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<plugin-io xmlns="urn:mojo-io:plugin-io:1.0">
+  <plugin groupId="org.apache.maven.plugins" artifactId="maven-pmd-plugin">
+    <!-- Forks pmd:pmd, which does the analysis; check itself only reads its report. -->
+    <mojo goal="check">
+      <outputs>
+        <observed/>
+      </outputs>
+    </mojo>
+    <mojo goal="pmd">
+      <inputs>
+        <testClasspath/>
+        <files expression="${project.build.outputDirectory}"/>
+        <files parameter="compileSourceRoots"/>
+        <files parameter="testSourceRoots"/>
+        <files parameter="rulesets"/>
+      </inputs>
+      <outputs>
+        <observed/>
+      </outputs>
+      <ignoredParameters>compileSourceRoots, testSourceRoots</ignoredParameters>
+    </mojo>
+  </plugin>
+</plugin-io>

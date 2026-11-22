@@ -41,6 +41,34 @@ public final class ExecutionContext {
         this.evaluator = new PluginParameterExpressionEvaluator(session, execution);
     }
 
+    /** How to resolve the project's test classpath on demand (absent in unit tests and graph export). */
+    public interface TestClasspath {
+        List<java.nio.file.Path> resolve() throws NotCacheableException;
+    }
+
+    private TestClasspath testClasspath;
+    private List<java.nio.file.Path> resolvedTestClasspath;
+
+    public ExecutionContext withTestClasspath(TestClasspath resolver) {
+        this.testClasspath = resolver;
+        return this;
+    }
+
+    public TestClasspath testClasspathResolver() {
+        return testClasspath;
+    }
+
+    /** The resolved test classpath, or {@code null} when this context cannot resolve one itself. */
+    public List<java.nio.file.Path> testClasspath() throws NotCacheableException {
+        if (testClasspath == null) {
+            return null;
+        }
+        if (resolvedTestClasspath == null) {
+            resolvedTestClasspath = testClasspath.resolve();
+        }
+        return resolvedTestClasspath;
+    }
+
     public boolean analysisOnly() {
         return analysisOnly;
     }
@@ -150,7 +178,17 @@ public final class ExecutionContext {
         } else if (value instanceof Path p) {
             out.add(resolve(p.toString()));
         } else if (value instanceof String s) {
-            if (!s.isBlank()) {
+            if (s.isBlank()) {
+                return;
+            }
+            // Some mojos take several files in one comma-separated string (SpotBugs filter files).
+            if (s.contains(",") && !java.nio.file.Files.exists(resolve(s))) {
+                for (String part : s.split(",")) {
+                    if (!part.isBlank()) {
+                        out.add(resolve(part.trim()));
+                    }
+                }
+            } else {
                 out.add(resolve(s));
             }
         } else {

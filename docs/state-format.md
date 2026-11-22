@@ -26,6 +26,7 @@ change property argLine -javaagent%3A%40%40M2REPO%40%40%2F...%3Ddestfile%3D%40%4
 | Line | Meaning |
 |---|---|
 | `execution <id>` | `groupId:artifactId:version:goal@executionId` |
+| `phase <name>` | The lifecycle phase the execution is bound to, as a phase of the Maven 4 tree (`compile`, `test`, `package`, …). Absent for an execution bound to none. |
 | `change compileSourceRoot <_> <path>` | Added a main source root. |
 | `change testCompileSourceRoot <_> <path>` | Added a test source root. |
 | `change property <name> <value>` | Set a project property. |
@@ -47,5 +48,19 @@ jar), the record isn't replayed.
 - **When:** at most once per project per build, before its first execution.
 - **What:** the state of every recorded execution that isn't in this build's plan for the project.
   Executions in the plan run (or are restored by the built-in cache) and set their own state.
+- **Other projects with `mojoio.only`:** the projects that aren't selected run nothing. Their state is
+  replayed when a selected project starts, and only **through the phase that project's mojos need them
+  at**, by the same rules as the task graph's `dependsOn`:
+  - compiling or testing needs a dependency through `ready` (its compiled classes);
+  - packaging needs runtime dependencies through `package`;
+  - a dependency on an attached artifact or an archive (a classifier, `test-jar`, `war`, …) needs
+    `package`.
+
+  State beyond that isn't trusted. In a build system's workspace it can be left over from an earlier
+  build (an old jar next to freshly restored classes), or be rewritten at that moment by a task running
+  in parallel. Projects the selected one doesn't depend on (its parents) are replayed fully.
+- **Not from later phases:** state recorded for a phase after the last phase of this invocation isn't
+  replayed (compiling doesn't replay what packaging recorded). In a build system's workspace that
+  state is typically left over from an earlier build.
 - **Order:** files are applied in file-name order. The changes of different executions are expected
   to be independent.

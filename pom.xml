@@ -12,6 +12,28 @@
   <name>mojo-io</name>
   <description>Mojo-level build cache for Maven 3.9+, delivered as a core extension.</description>
 
+  <url>https://github.com/frontseat-dev/frontseat-maven</url>
+
+  <scm>
+    <connection>scm:git:https://github.com/frontseat-dev/frontseat-maven.git</connection>
+    <developerConnection>scm:git:https://github.com/frontseat-dev/frontseat-maven.git</developerConnection>
+    <url>https://github.com/frontseat-dev/frontseat-maven</url>
+  </scm>
+
+  <!-- GitHub Packages. The server id "github" needs credentials in settings.xml (in CI: GITHUB_TOKEN). -->
+  <distributionManagement>
+    <repository>
+      <id>github</id>
+      <name>GitHub Packages</name>
+      <url>https://maven.pkg.github.com/frontseat-dev/frontseat-maven</url>
+    </repository>
+    <snapshotRepository>
+      <id>github</id>
+      <name>GitHub Packages</name>
+      <url>https://maven.pkg.github.com/frontseat-dev/frontseat-maven</url>
+    </snapshotRepository>
+  </distributionManagement>
+
   <modules>
     <module>mojo-io-spec</module>
     <module>mojo-io-cache</module>

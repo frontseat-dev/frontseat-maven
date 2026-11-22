@@ -22,8 +22,10 @@ injected.
 ## Per execution
 
 1. **Declaration lookup** by `groupId:artifactId:goal` (project → plugin jar → built-in), mapped
-   to an executable descriptor. An unknown input/output kind makes the mojo non-cacheable. No descriptor: run. Aggregators and mojos with
-   forked executions: run.
+   to an executable descriptor. An unknown input/output kind makes the mojo non-cacheable. No descriptor: run. Aggregators: run, unless the declaration covers the
+   whole reactor (a `reactorModels` input). A mojo that forks
+   executions (`pmd:check` forks `pmd:pmd`) is one unit with them: their configuration and inputs join
+   its key and their outputs join its entry. If one of them has no declaration, it runs.
 2. **Resolve dependencies** for the mojo's `requiresDependencyResolution` scope *before* it runs, and
    set the project's artifact filter like `MojoExecutor` does. On a hit the runner is never called,
    but the key still needs the classpath.

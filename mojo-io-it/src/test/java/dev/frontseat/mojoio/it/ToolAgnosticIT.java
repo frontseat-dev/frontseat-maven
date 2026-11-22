@@ -78,6 +78,35 @@ class ToolAgnosticIT {
         }
     }
 
+    /**
+     * A build system's workspace keeps outputs of earlier builds. Here lib-core's jar and its recorded
+     * state are older than its freshly compiled classes. A task may only rely on the upstream state it
+     * depends on: app's compile needs lib-core "ready" (its classes), so it must not pick up the old jar.
+     */
+    @Test
+    void upstreamStateBeyondWhatATaskNeedsIsNotTrusted() throws Exception {
+        Path cache = MavenBuild.cacheDir("stale-upstream");
+        MavenBuild build = MavenBuild.checkout(PROJECT, "stale-upstream", "checkout", cache);
+        build.run("package", NO_CACHE, "-DskipTests");
+
+        Path greeter = build.dir().resolve("lib-core/src/main/java/sample/core/Greeter.java");
+        String source = Files.readString(greeter);
+        Files.writeString(greeter, source.substring(0, source.lastIndexOf('}'))
+                + "\n    public String shout(String name) {\n        return greet(name).toUpperCase();\n    }\n}\n");
+        Path app = build.dir().resolve("app/src/main/java/sample/app/App.java");
+        Files.writeString(app, Files.readString(app).replace("new Greeter().greet(name)", "new Greeter().shout(name)"));
+
+        String compile = "org.apache.maven.plugins:maven-compiler-plugin:3.13.0:compile@default-compile";
+        build.run("-pl", "com.example.samples:lib-core", "-am", "-Dmojoio.only=com.example.samples:lib-core", NO_CACHE,
+                "-Dmojoio.prerequisites=false", compile);
+        MavenBuild.Result result = build.run("-pl", "com.example.samples:app", "-am",
+                "-Dmojoio.only=com.example.samples:app", NO_CACHE, "-Dmojoio.prerequisites=false", compile);
+        assertFalse(result.log().contains("maven-jar-plugin:jar@default-jar @ lib-core replayed"),
+                "lib-core's packaging state is beyond what compiling app needs\n" + result.log());
+        assertTrue(result.log().contains("maven-compiler-plugin:3.13.0:compile@default-compile @ lib-core replayed"),
+                result.log());
+    }
+
     @Test
     void graphDescribesEveryExecutionWithoutRunningAny() throws Exception {
         Path cache = MavenBuild.cacheDir("graph");

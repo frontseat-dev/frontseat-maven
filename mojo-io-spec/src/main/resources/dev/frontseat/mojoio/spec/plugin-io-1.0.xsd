@@ -81,7 +81,10 @@
       </xs:element>
       <!-- The project's resolved test classpath, for mojos that compute it internally. -->
       <xs:element name="testClasspath">
-        <xs:complexType/>
+        <xs:complexType>
+          <!-- false: without the project's own classes and test-classes directories (dependencies only). -->
+          <xs:attribute name="ownOutputs" type="xs:boolean"/>
+        </xs:complexType>
       </xs:element>
       <!-- A List<Resource> parameter: resource settings plus selected file content; filtering adds
            project coordinates, project properties and user properties. -->
@@ -92,6 +95,28 @@
         </xs:complexType>
       </xs:element>
       <!-- Current value of a project property the mojo reads and rewrites. -->
+      <xs:element name="projectFiles">
+        <xs:annotation><xs:documentation>The project's own files: its directory without the build directory, nested modules and VCS data.</xs:documentation></xs:annotation>
+        <xs:complexType>
+          <xs:attribute name="excludes" type="xs:string"/>
+        </xs:complexType>
+      </xs:element>
+      <xs:element name="projectModel">
+        <xs:annotation><xs:documentation>The project's effective model, for mojos that read the project rather than their configuration.</xs:documentation></xs:annotation>
+        <xs:complexType/>
+      </xs:element>
+      <xs:element name="reactorModels">
+        <xs:annotation><xs:documentation>The effective models of every project of the build. Declaring it is what allows an aggregator mojo to be cached.</xs:documentation></xs:annotation>
+        <xs:complexType/>
+      </xs:element>
+      <xs:element name="sessionGoals">
+        <xs:annotation><xs:documentation>The goals and phases the build was started with, for mojos whose result depends on them.</xs:documentation></xs:annotation>
+        <xs:complexType/>
+      </xs:element>
+      <xs:element name="mavenVersion">
+        <xs:annotation><xs:documentation>The Maven version, for mojos whose result depends on it.</xs:documentation></xs:annotation>
+        <xs:complexType/>
+      </xs:element>
       <xs:element name="projectProperty">
         <xs:complexType>
           <xs:attribute name="nameParameter" type="xs:string"/>

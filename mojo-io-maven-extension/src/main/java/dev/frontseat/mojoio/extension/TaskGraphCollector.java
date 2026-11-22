@@ -81,6 +81,8 @@ public class TaskGraphCollector {
                 Map<String, Object> dep = new LinkedHashMap<>();
                 dep.put("id", id);
                 dep.put("scope", d.getScope() == null ? "compile" : d.getScope());
+                dep.put("type", d.getType() == null ? "jar" : d.getType());
+                dep.put("classifier", d.getClassifier() == null || d.getClassifier().isBlank() ? null : d.getClassifier());
                 reactorDependencies.add(dep);
             }
         }
@@ -165,10 +167,25 @@ public class TaskGraphCollector {
         e.put("goal", m.getGoal());
         e.put("executionId", m.getExecutionId());
         e.put("phase", m.getLifecyclePhase());
+        // Maven resolves the project's dependencies of this scope before the mojo runs, so the reactor
+        // dependencies in it must have been built, whatever the lifecycle's links say.
+        String resolution = ForkedGoals.resolution(m);
+        e.put("requiresDependencyResolution", resolution == null || resolution.isBlank() ? null : resolution);
+        // Plugins and plugin dependencies built in this reactor: needed packaged before the mojo runs.
+        e.put("pluginReactorDependencies", UpstreamState.pluginReactorDependencies(m, session));
+        // Invoked as a goal, Maven runs an aggregator once, for the build's top-level project, whatever
+        // project it is bound in.
+        e.put("aggregator", m.getMojoDescriptor() != null && m.getMojoDescriptor().isAggregator());
         e.put("invocation", StateFiles.executionId(m)); // groupId:artifactId:version:goal@executionId, runnable as-is
-        Optional<MojoCacheDescriptor> descriptor = registry.find(m, session);
+        Optional<MojoCacheDescriptor> descriptor = registry.find(m, session)
+                .map(d -> ForkedGoals.merge(m, project, session, registry, d));
         e.put("declaredBy", descriptor.map(MojoCacheDescriptor::source).orElse(null));
         e.put("stamping", descriptor.map(d -> d.stampingCarry() ? "carry" : "exact").orElse("exact"));
+        // Bookkeeping the execution (or Maven itself) writes in the build directory: not outputs. Build
+        // systems must leave these out of observed outputs, or they make hashes unstable.
+        List<String> ignoredWrites = new ArrayList<>(WriteSnapshot.MAVEN_WRITES);
+        descriptor.ifPresent(d -> ignoredWrites.addAll(d.ignoredWrites()));
+        e.put("ignoredWrites", ignoredWrites);
 
         List<Object> inputs = new ArrayList<>();
         List<Object> outputs = new ArrayList<>();
@@ -178,10 +195,9 @@ public class TaskGraphCollector {
             reason = "no plugin-io declaration";
         } else if (!descriptor.get().cacheable()) {
             reason = descriptor.get().notCacheableReason();
-        } else if (m.getMojoDescriptor() != null && m.getMojoDescriptor().isAggregator()) {
-            reason = "aggregator mojo";
-        } else if (m.getForkedExecutions() != null && !m.getForkedExecutions().isEmpty()) {
-            reason = "forks a lifecycle";
+        } else if (m.getMojoDescriptor() != null && m.getMojoDescriptor().isAggregator()
+                && !descriptor.get().reactorWide()) {
+            reason = "aggregator mojo without a reactorModels input";
         } else {
             ExecutionContext ctx = new ExecutionContext(session, project, m, normalizer, true);
             try {
@@ -267,14 +283,15 @@ public class TaskGraphCollector {
         return g;
     }
 
-    synchronized void write(MavenSession session, Path file) {
+    synchronized void write(MavenSession session, Path file, MojoIoConfig.Granularity granularity) {
         Map<String, Object> graph = graphs.remove(session);
         if (graph == null) {
             graph = newGraph(session);
         }
         LifecycleModel model = models.computeIfAbsent(session, LifecycleModel::load);
         graph.put("lifecycle", lifecycle(model));
-        addTasks(graph, model);
+        graph.put("granularity", granularity.name().toLowerCase(java.util.Locale.ROOT));
+        addTasks(graph, model, granularity);
         try {
             Files.createDirectories(file.getParent());
             Files.writeString(file, Json.write(graph), StandardCharsets.UTF_8);
@@ -312,32 +329,55 @@ public class TaskGraphCollector {
     }
 
     /**
-     * Ready-made tasks per project: executions grouped by runTogether, else canonicalPhase. A task
-     * depends on the previous task of its project and, per dependencies-link of its lifecycle phase, on
-     * the last task of each matching reactor dependency that the link's phase covers (e.g. app's
-     * compile on lib-core's tasks up to "ready", not its tests or packaging).
+     * Ready-made tasks per project. Executions are grouped by granularity: {@code phase} (runTogether
+     * group, else canonicalPhase), {@code stage} (compile, test, package, verify; see
+     * {@link LifecycleModel#stage}) or {@code module} (one task, "build"). A task depends on the previous
+     * task of its project and, per dependencies-link of each of its lifecycle phases, on the task of each
+     * matching reactor dependency that completes the link's phase (e.g. app's compile on lib-core's
+     * tasks up to "ready", not its tests or packaging).
      */
     @SuppressWarnings("unchecked")
-    private static void addTasks(Map<String, Object> graph, LifecycleModel model) {
+    private static void addTasks(Map<String, Object> graph, LifecycleModel model, MojoIoConfig.Granularity granularity) {
         Map<String, List<Map<String, Object>>> tasksByProject = new LinkedHashMap<>();
+        Map<String, List<Object>> dependenciesByProject = new java.util.HashMap<>();
+        for (Object po : (List<Object>) graph.get("projects")) {
+            dependenciesByProject.put((String) ((Map<String, Object>) po).get("id"),
+                    (List<Object>) ((Map<String, Object>) po).get("dependencies"));
+        }
         for (Object po : (List<Object>) graph.get("projects")) {
             Map<String, Object> p = (Map<String, Object>) po;
             String projectId = (String) p.get("id");
             Map<String, Map<String, Object>> tasks = new LinkedHashMap<>();
             for (Object eo : (List<Object>) p.get("executions")) {
                 Map<String, Object> e = (Map<String, Object>) eo;
-                String name = e.get("runTogether") != null ? (String) e.get("runTogether")
+                String phase = (String) e.get("lifecyclePhase");
+                String fine = e.get("runTogether") != null ? (String) e.get("runTogether")
                         : e.get("canonicalPhase") != null ? (String) e.get("canonicalPhase") : (String) e.get("goal");
+                String stage = phase == null ? null : model.stage(phase);
+                String name = switch (granularity) {
+                    case PHASE -> fine;
+                    case STAGE -> stage != null ? stage : fine;
+                    case MODULE -> "build";
+                };
                 Map<String, Object> t = tasks.computeIfAbsent(name, n -> {
                     Map<String, Object> task = new LinkedHashMap<>();
                     task.put("id", projectId + ":" + n);
                     task.put("name", n);
-                    task.put("lifecyclePhase", e.get("lifecyclePhase"));
+                    task.put("lifecyclePhase", phase);
+                    task.put("lifecyclePhases", new ArrayList<String>());
                     task.put("executions", new ArrayList<String>());
                     task.put("dependsOn", new ArrayList<String>());
                     return task;
                 });
                 ((List<String>) t.get("executions")).add((String) e.get("id"));
+                List<String> phases = (List<String>) t.get("lifecyclePhases");
+                if (phase != null && !phases.contains(phase)) {
+                    phases.add(phase);
+                }
+            }
+            Map<String, Map<String, Object>> executionsById = new java.util.HashMap<>();
+            for (Object eo : (List<Object>) p.get("executions")) {
+                executionsById.put((String) ((Map<String, Object>) eo).get("id"), (Map<String, Object>) eo);
             }
             String previous = null;
             for (Map<String, Object> t : tasks.values()) {
@@ -345,25 +385,47 @@ public class TaskGraphCollector {
                 if (previous != null) {
                     dependsOn.add(previous);
                 }
-                String phase = (String) t.get("lifecyclePhase");
-                for (LifecycleModel.Link link : phase == null ? List.<LifecycleModel.Link>of() : model.links(phase)) {
-                    if (!link.type().equals("dependencies")) {
+                // What the task's mojos make Maven resolve: those reactor dependencies must be "ready",
+                // even where no link of the task's phases asks for them (e.g. a check in the compile
+                // stage that resolves the test classpath).
+                Set<String> resolved = new java.util.HashSet<>();
+                for (String id : (List<String>) t.get("executions")) {
+                    String scope = (String) executionsById.get(id).get("requiresDependencyResolution");
+                    if (scope != null) {
+                        resolved.addAll(LifecycleModel.resolutionScopes(scope));
+                    }
+                }
+                for (Object d : (List<Object>) p.get("dependencies")) {
+                    Map<String, Object> dep = (Map<String, Object>) d;
+                    if (!resolved.contains((String) dep.get("scope"))) {
                         continue;
                     }
-                    Set<String> done = model.doneBy(link.phase());
-                    for (Object d : (List<Object>) p.get("dependencies")) {
-                        Map<String, Object> dep = (Map<String, Object>) d;
-                        if (!LifecycleModel.scopes(link.scope()).contains((String) dep.get("scope"))) {
+                    addUpstream(dependsOn, tasksByProject, (String) dep.get("id"), model.doneBy(upstreamPhase(dep, "ready")));
+                    closure((String) dep.get("id"), resolved.contains("runtime"), dependenciesByProject).forEach((id, via) ->
+                            addUpstream(dependsOn, tasksByProject, id, model.doneBy(upstreamPhase(via, "ready"))));
+                }
+                for (String id : (List<String>) t.get("executions")) {
+                    for (String plugin : (List<String>) executionsById.get(id).get("pluginReactorDependencies")) {
+                        addUpstream(dependsOn, tasksByProject, plugin, model.doneBy("package"));
+                        closure(plugin, true, dependenciesByProject).forEach((member, via) ->
+                                addUpstream(dependsOn, tasksByProject, member, model.doneBy("package")));
+                    }
+                }
+                for (String phase : (List<String>) t.get("lifecyclePhases")) {
+                    for (LifecycleModel.Link link : model.links(phase)) {
+                        if (!link.type().equals("dependencies")) {
                             continue;
                         }
-                        String last = null;
-                        for (Map<String, Object> ut : tasksByProject.getOrDefault((String) dep.get("id"), List.of())) {
-                            if (done.contains((String) ut.get("lifecyclePhase"))) {
-                                last = (String) ut.get("id");
+                        for (Object d : (List<Object>) p.get("dependencies")) {
+                            Map<String, Object> dep = (Map<String, Object>) d;
+                            if (!LifecycleModel.scopes(link.scope()).contains((String) dep.get("scope"))) {
+                                continue;
                             }
-                        }
-                        if (last != null && !dependsOn.contains(last)) {
-                            dependsOn.add(last);
+                            addUpstream(dependsOn, tasksByProject, (String) dep.get("id"),
+                                    model.doneBy(upstreamPhase(dep, link.phase())));
+                            closure((String) dep.get("id"), LifecycleModel.scopes(link.scope()).contains("runtime"),
+                                    dependenciesByProject).forEach((id, via) -> addUpstream(dependsOn, tasksByProject,
+                                            id, model.doneBy(upstreamPhase(via, link.phase()))));
                         }
                     }
                 }
@@ -372,6 +434,70 @@ public class TaskGraphCollector {
             tasksByProject.put(projectId, new ArrayList<>(tasks.values()));
             p.put("tasks", new ArrayList<>(tasks.values()));
         }
+    }
+
+    /** Adds the last task of {@code projectId} with work in {@code done} (the phases a link waits for). */
+    @SuppressWarnings("unchecked")
+    private static void addUpstream(List<String> dependsOn, Map<String, List<Map<String, Object>>> tasksByProject,
+                                    String projectId, Set<String> done) {
+        String last = null;
+        for (Map<String, Object> ut : tasksByProject.getOrDefault(projectId, List.of())) {
+            if (((List<String>) ut.get("lifecyclePhases")).stream().anyMatch(done::contains)) {
+                last = (String) ut.get("id");
+            }
+        }
+        if (last != null && !dependsOn.contains(last)) {
+            dependsOn.add(last);
+        }
+    }
+
+    /**
+     * Reactor projects that come with {@code projectId} on a classpath, transitively, each with the
+     * dependency declaration it was reached through: its compile-scoped dependencies, and where code
+     * runs ({@code runtime}) its runtime-scoped ones too. The project itself is not included.
+     *
+     * <p>A project's own tasks do not reach these: its compile task does not wait for its runtime
+     * dependencies, and a pom project in between may have no task at all.
+     */
+    @SuppressWarnings("unchecked")
+    static Map<String, Map<String, Object>> closure(String projectId, boolean runtime,
+                                                    Map<String, List<Object>> dependenciesByProject) {
+        Set<String> scopes = runtime ? Set.of("compile", "runtime") : Set.of("compile");
+        Map<String, Map<String, Object>> seen = new LinkedHashMap<>();
+        java.util.ArrayDeque<String> queue = new java.util.ArrayDeque<>(List.of(projectId));
+        while (!queue.isEmpty()) {
+            for (Object d : dependenciesByProject.getOrDefault(queue.poll(), List.of())) {
+                Map<String, Object> dep = (Map<String, Object>) d;
+                String id = (String) dep.get("id");
+                if (!scopes.contains((String) dep.get("scope")) || id.equals(projectId)) {
+                    continue;
+                }
+                Map<String, Object> known = seen.get(id);
+                // An attached artifact or archive asks for more (the packaged project): keep that one.
+                if (known == null || (upstreamPhase(known, "ready").equals("ready") && !upstreamPhase(dep, "ready").equals("ready"))) {
+                    seen.put(id, dep);
+                    if (known == null) {
+                        queue.add(id);
+                    }
+                }
+            }
+        }
+        return seen;
+    }
+
+    /** Dependency types whose artifact Maven can take from the upstream project's classes directory. */
+    private static final Set<String> RESOLVABLE_WHEN_READY = Set.of("jar", "pom", "bundle", "maven-plugin", "ejb");
+
+    /**
+     * The upstream phase a dependency needs. Where the lifecycle asks for "ready" (classes compiled),
+     * that only serves the plain main artifact. Anything else only exists once the upstream project is
+     * packaged: an attached artifact (any classifier: tests, sources, javadoc, …; or a type that implies
+     * one: test-jar, java-source, javadoc, ejb-client) and archives such as war or zip.
+     */
+    static String upstreamPhase(Map<String, Object> dependency, String phase) {
+        boolean packaged = dependency.get("classifier") != null
+                || !RESOLVABLE_WHEN_READY.contains(String.valueOf(dependency.get("type")));
+        return packaged && phase.equals("ready") ? "package" : phase;
     }
 
     private static Path root(MavenSession session) {

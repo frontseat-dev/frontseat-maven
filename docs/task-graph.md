@@ -79,8 +79,9 @@ resolve its upstream module, and JaCoCo's agent isn't attached.
 
 What a build system (Nx, Bazel, Turborepo, a CI cache, …) needs, all in the graph:
 
-1. **Tasks.** Use each project's ready-made `tasks`. Each one groups executions by `runTogether`, else by
-   `canonicalPhase`, and lists its `dependsOn` task ids (see [Phase links](#phase-links) below). To build
+1. **Tasks.** Use each project's ready-made `tasks`. Each one groups executions by the chosen
+   [granularity](#granularity) (by default a stage: compile, test, package, verify) and lists its
+   `dependsOn` task ids (see [Phase links](#phase-links) below). To build
    tasks yourself, group by `canonicalPhase`, which is the same on Maven 3 and 4. Executions sharing a `runTogether` value (a phase
    with its `pre-`/`post-` or Maven 4 `before:`/`after:` hooks) **must** be one task. Hooks hold
    process-local state: a server started in `pre-integration-test` dies with that Maven process.
@@ -97,7 +98,11 @@ What a build system (Nx, Bazel, Turborepo, a CI cache, …) needs, all in the gr
 4. **Run one task.** Run
    `mvn -pl <id> -am -Dmojoio.only=<id> -Dmojoio.prerequisites=false -Dmojoio.cache.enabled=false <invocation>...`.
    - `-am` puts the upstream projects in the reactor, so their restored outputs resolve.
-   - `mojoio.only` makes sure only this project's mojos run.
+   - `mojoio.only` makes sure only this project's mojos run. If the build ends without failing and
+     without building a selected project, the extension fails it: an empty result must never be
+     cached as a success. The other projects' state is replayed
+     only as far as the task's `dependsOn` reach, so leftovers of later tasks in the workspace (an
+     old jar) are never picked up.
    - The extension replays the recorded state of everything that doesn't run: artifact files,
      attachments, generated source roots, properties like JaCoCo's `argLine`.
 
@@ -105,8 +110,8 @@ Fingerprints include stamp values such as the project version, because a build s
 byte for byte and can't rewrite the version inside them.
 
 `ExternalBuildSystemIT` does exactly this, with a small reference implementation
-(`ReferenceBuildSystem`) and mojo-io's own cache switched off. A fresh checkout is restored entirely from
-the build system's cache, and editing one test re-runs exactly that project's `test-compile` and `test`.
+(`ReferenceBuildSystem`) and mojo-io's own cache switched off, at `phase` and at `stage` granularity. A fresh checkout is restored entirely from
+the build system's cache, and editing one test re-runs exactly that project's `test-compile` and `test` (or its `test` stage).
 `HookBracketsIT` shows that splitting a hook bracket breaks the integration tests.
 
 ### Phase links
@@ -127,13 +132,30 @@ The default links, from 4.0.0-rc-7:
 | `test` | own `test-compile` and `test-resources`; **dependencies' (test scope) `ready`** |
 | `install`, `deploy` | own `package` |
 
-Each task's `dependsOn` has two parts:
+Each task's `dependsOn` has three parts:
 - the previous task of its project;
-- for every dependencies-link of its `lifecyclePhase`, the last task of each matching reactor dependency
-  that the linked phase covers.
+- for every dependencies-link of its `lifecyclePhases`, the last task of each matching reactor dependency
+  with work the linked phase covers;
+- for every scope one of its mojos makes Maven resolve (`requiresDependencyResolution` on the
+  execution), the "ready" task of each reactor dependency in that scope. The links alone miss this: a
+  check bound to `validate` that resolves the test classpath needs the project's test-scope
+  dependencies built, although no link of the compile stage asks for them.
+
+Where a task runs code (the test and runtime scopes), it also waits for the compile- and runtime-scoped
+reactor dependencies of its dependencies, transitively. A project's own compile task doesn't wait for
+its runtime dependencies, so they wouldn't be reached through it.
+
+"Ready" (classes compiled) only serves a dependency on the plain main artifact. A dependency on
+anything else needs the upstream project's **package** task instead, because the file only exists once
+it's packaged:
+- an attached artifact: any classifier (`tests`, `sources`, `javadoc`, …) or a type that implies one
+  (`test-jar`, `java-source`, `javadoc`, `ejb-client`);
+- an archive such as `war` or `zip`.
+
+Each entry of a project's `dependencies` carries `scope`, `type` and `classifier` for this.
 
 So `app:compile` and `app:test` depend on `lib-core:compile` ("ready"), not on `lib-core:test` or
-`lib-core:package`. In `ExternalBuildSystemIT`, changing a `lib-core` test re-runs exactly
+`lib-core:package`. In `ExternalBuildSystemIT` (at `phase` granularity), changing a `lib-core` test re-runs exactly
 `lib-core:test-compile` and `lib-core:test`; every `app` task stays a hit, and with project-level
 edges they would all have re-run.
 
@@ -143,18 +165,50 @@ Maven 3 order.
 
 ### Granularity
 
-The graph is per mojo execution. Orchestrators that start one Maven process per task will usually
-group the executions of one project and phase (or `runTogether` group) into one task:
+`executions` are always listed one by one. `mojoio.graph.granularity` sets how `tasks` group them
+(the graph's `granularity` field records it):
+
+| Value | Tasks per project | Use when |
+|---|---|---|
+| `phase` | One per lifecycle phase with its hooks (`runTogether`), e.g. `process-resources`, `compile`, `test-compile`, `test`, `package`. | You want the finest caching and invocations are cheap. |
+| `stage` (default) | `compile` (everything up to Maven 4's `ready`: sources, resources, compile), `test` (unit tests), `package`, `verify` (integration tests and verification), `install`, `deploy`. | Usual choice: about half the invocations of `phase`. |
+| `module` | One: `build`. | Invocations are expensive (no daemon, remote execution), or you only want module-level caching. |
+
+Every task is one Maven invocation, which costs about 0.1s through mvnd and seconds without a daemon
+(see [performance](performance.md#what-a-maven-invocation-costs-and-how-to-pay-it-less-often)).
+Bigger tasks mean fewer invocations; smaller tasks mean a change invalidates less.
+
+Phase links hold at every granularity. With `stage`, `app:compile` and `app:test` depend on
+`lib-core:compile` only, so changing a `lib-core` test re-runs `lib-core:test` and nothing in `app`
+before packaging. With `module`, `app:build` depends on `lib-core:build`.
+
+For a task of several executions:
 - **Cacheable** only if every member execution is.
 - **Inputs and outputs** are the union of its members', minus files produced by earlier members of
-  the same group.
+  the same task. (Those don't exist yet when the task is hashed on a fresh checkout.)
+- A `runTogether` group is never split: stages are made of whole phases with their hooks.
+
+### Aggregators
+
+An execution with `"aggregator": true` is an aggregator mojo. Invoked as a goal (which is how a task
+runs), Maven runs an aggregator **once, for the build's top-level project**, whatever project it is
+bound in. So in a task of another project it doesn't run at all, and in the top-level project's task
+"the build" is that project and what it depends on, not the whole workspace. Where the aggregate over
+the whole build matters (an aggregate BOM, aggregated reports), run that goal in a full build.
+
+### Plugins built in the build
+
+`pluginReactorDependencies` lists the reactor projects a mojo's plugin is made of: the plugin itself
+or its `<dependencies>` (for example a build-tools module holding a checkstyle configuration). The task
+depends on their package tasks.
 
 ### Not cacheable
 
 `cacheable: false` with a `reason` means one of:
 - no declaration exists (see [plugin-io](plugin-io.md));
 - the declaration says the mojo can't be cached;
-- the mojo is an aggregator or forks a lifecycle;
+- the mojo is an aggregator, or forks an execution that isn't declared (a mojo that forks declared
+  goals is one execution in the graph, with their inputs and outputs);
 - describing it failed.
 
 A consumer should always run such executions.

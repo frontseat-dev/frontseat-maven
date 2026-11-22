@@ -18,7 +18,8 @@ public final class MojoCacheDescriptor {
     /** Parameters that are Maven objects rather than configuration. Never hashed. */
     public static final Set<String> ALWAYS_IGNORED = Set.of(
             "project", "session", "mojoExecution", "mojo", "plugin", "pluginDescriptor", "settings",
-            "reactorProjects", "localRepository", "remoteRepositories", "repoSession",
+            "reactorProjects", "localRepository", "remoteRepositories", "remoteProjectRepositories",
+            "remotePluginRepositories", "repoSession",
             "repositorySystemSession", "projectArtifact", "pluginArtifactMap", "projectArtifactMap",
             "pluginArtifacts");
 
@@ -32,9 +33,11 @@ public final class MojoCacheDescriptor {
     private final String source;
     private final boolean stampingCarry;
     private final List<String> ignoredWrites;
+    private final boolean reactorWide;
 
     private MojoCacheDescriptor(Builder b) {
         this.ignoredWrites = List.copyOf(b.ignoredWrites);
+        this.reactorWide = b.reactorWide;
         this.source = b.source;
         this.stampingCarry = b.stampingCarry;
         this.pluginKey = b.pluginKey;
@@ -93,6 +96,14 @@ public final class MojoCacheDescriptor {
         return ignoredWrites;
     }
 
+    /**
+     * The declaration covers the whole reactor (it has a {@code reactorModels} input): the only case in
+     * which an aggregator mojo is cached.
+     */
+    public boolean reactorWide() {
+        return reactorWide;
+    }
+
     /** Where this descriptor came from (built-in, plugin, project file); shown in key manifests. */
     public String source() {
         return source;
@@ -101,6 +112,35 @@ public final class MojoCacheDescriptor {
     /** Lifecycle phase to run first when this goal is invoked directly, or {@code null}. */
     public String prerequisitePhase() {
         return prerequisitePhase;
+    }
+
+    private Builder copy() {
+        Builder b = new Builder(pluginKey, goal);
+        b.notCacheableReason = notCacheableReason;
+        b.inputs.addAll(inputs);
+        b.outputs.addAll(outputs);
+        b.ignored.addAll(ignoredParameters);
+        b.prerequisitePhase = prerequisitePhase;
+        b.source = source;
+        b.stampingCarry = stampingCarry;
+        b.ignoredWrites.addAll(ignoredWrites);
+        b.reactorWide = reactorWide;
+        return b;
+    }
+
+    /** This descriptor with more inputs, outputs and ignored writes (those of goals the mojo forks). */
+    public MojoCacheDescriptor plus(List<InputSpec> moreInputs, List<OutputSpec> moreOutputs,
+                                    java.util.Collection<String> moreIgnoredWrites) {
+        Builder b = copy();
+        b.inputs.addAll(moreInputs);
+        b.outputs.addAll(moreOutputs);
+        b.ignoredWrites.addAll(moreIgnoredWrites);
+        return b.build();
+    }
+
+    /** This descriptor, marked not cacheable. */
+    public MojoCacheDescriptor notCacheable(String reason) {
+        return copy().notCacheable(reason).build();
     }
 
     public static final class Builder {
@@ -114,6 +154,7 @@ public final class MojoCacheDescriptor {
         private String source = "code";
         private boolean stampingCarry;
         private final List<String> ignoredWrites = new ArrayList<>();
+        private boolean reactorWide;
 
         private Builder(String pluginKey, String goal) {
             this.pluginKey = pluginKey;
@@ -141,6 +182,11 @@ public final class MojoCacheDescriptor {
 
         public Builder ignoreWrites(java.util.Collection<String> patterns) {
             ignoredWrites.addAll(patterns);
+            return this;
+        }
+
+        public Builder reactorWide(boolean reactorWide) {
+            this.reactorWide = reactorWide;
             return this;
         }
 

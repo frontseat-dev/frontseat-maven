@@ -12,6 +12,7 @@
     "maven": { "type": "string", "description": "Maven version that computed the graph." },
     "goals": { "type": "array", "items": { "type": "string" }, "description": "Goals/phases the graph was computed for." },
     "projects": { "type": "array", "items": { "$ref": "#/$defs/project" } },
+    "granularity": { "enum": ["phase", "stage", "module"], "description": "How each project's executions are grouped into tasks (mojoio.graph.granularity)." },
     "lifecycle": {
       "type": "object",
       "description": "Maven 4's default lifecycle: the phase tree with its links (read from Maven 4 at run time; a built-in copy of the Maven 4 default on Maven 3) and the Maven 3 -> Maven 4 phase aliases.",
@@ -37,7 +38,7 @@
         "packaging": { "type": "string" },
         "dependsOn": { "type": "array", "items": { "type": "string" }, "description": "ids of reactor projects this one depends on directly (dependencies, parent, plugins)." },
         "poms": { "type": "array", "items": { "type": "string" }, "description": "This project's pom and its ancestors inside the workspace." },
-        "dependencies": { "type": "array", "items": { "type": "object", "properties": { "id": { "type": "string" }, "scope": { "type": "string" } } }, "description": "Direct reactor dependencies with their Maven scope: what the lifecycle's dependencies-links point at." },
+        "dependencies": { "type": "array", "items": { "type": "object", "properties": { "id": { "type": "string" }, "scope": { "type": "string" }, "type": { "type": "string" }, "classifier": { "type": ["string", "null"] } } }, "description": "Direct reactor dependencies with their Maven scope, type and classifier: what the lifecycle's dependencies-links point at. One with a classifier (tests, sources, …) or a type other than a plain jar (test-jar, java-source, war, zip, …) only exists once the upstream project is packaged: it needs the upstream package task." },
         "tasks": { "type": "array", "items": { "$ref": "#/$defs/task" }, "description": "Ready-made tasks for build systems, in execution order." },
         "externalDependencies": { "type": "array", "items": { "type": "string" }, "description": "Non-reactor dependencies, collected without resolving files: groupId:artifactId:type[:classifier]:version:scope." },
         "executions": { "type": "array", "items": { "$ref": "#/$defs/execution" }, "description": "In execution order." }
@@ -48,10 +49,11 @@
       "required": ["id", "name", "executions", "dependsOn"],
       "properties": {
         "id": { "type": "string", "description": "<project id>:<name>" },
-        "name": { "type": "string", "description": "runTogether group, else canonicalPhase." },
-        "lifecyclePhase": { "type": ["string", "null"], "description": "Phase of the Maven 4 tree the task belongs to." },
+        "name": { "type": "string", "description": "By granularity. phase: runTogether group, else canonicalPhase. stage: compile, test, package, verify, install, deploy (else as phase). module: build." },
+        "lifecyclePhase": { "type": ["string", "null"], "description": "First phase of the Maven 4 tree the task covers." },
+        "lifecyclePhases": { "type": "array", "items": { "type": "string" }, "description": "Every phase of the Maven 4 tree the task covers, in order." },
         "executions": { "type": "array", "items": { "type": "string" }, "description": "Execution ids, in order; run them in one invocation." },
-        "dependsOn": { "type": "array", "items": { "type": "string" }, "description": "Task ids: the previous task of the project, and per dependencies-link of the task's phase, the last task of each matching reactor dependency that the link's phase covers." }
+        "dependsOn": { "type": "array", "items": { "type": "string" }, "description": "Task ids: the previous task of the project, and per dependencies-link of each of the task's phases, the last task of each matching reactor dependency with work the link's phase covers; and the \"ready\" task of each reactor dependency in a scope one of its mojos resolves." }
       }
     },
     "execution": {
@@ -64,6 +66,9 @@
         "goal": { "type": "string" },
         "executionId": { "type": "string" },
         "phase": { "type": ["string", "null"], "description": "Lifecycle phase, null for goals invoked directly." },
+        "pluginReactorDependencies": { "type": "array", "items": { "type": "string" }, "description": "Reactor projects the mojo's plugin is made of (the plugin itself or its dependencies): needed packaged before the mojo runs." },
+        "aggregator": { "type": "boolean", "description": "An aggregator mojo. Invoked as a goal, Maven runs it once, for the build's top-level project, whatever project it is bound in." },
+        "requiresDependencyResolution": { "type": ["string", "null"], "description": "Scope of the project dependencies Maven resolves before the mojo runs (compile, runtime, test, …); the reactor dependencies in it must have been built." },
         "invocation": { "type": "string", "description": "Runs exactly this execution when passed to mvn as a goal (groupId:artifactId:version:goal@executionId)." },
         "lifecyclePhase": { "type": ["string", "null"], "description": "The Maven 4 lifecycle tree phase the execution belongs to (hooks and Maven 3 aliases resolved)." },
         "canonicalPhase": { "type": ["string", "null"], "description": "The Maven 3 name of the phase (Maven 4 reports hooks, e.g. after:resources = process-resources); identical across Maven versions." },
@@ -75,6 +80,7 @@
         "reason": { "type": ["string", "null"], "description": "Why the execution is not cacheable." },
         "inputs": { "type": "array", "items": { "$ref": "#/$defs/input" } },
         "outputs": { "type": "array", "items": { "$ref": "#/$defs/output" } },
+        "ignoredWrites": { "type": "array", "items": { "type": "string" }, "description": "Ant patterns, relative to the project build directory, of bookkeeping files the execution or Maven writes (e.g. maven-status/**, maven-archiver/**, consumer-*.pom). Not outputs; exclude them from observed outputs." },
         "stateFile": { "type": "string", "description": "Where the execution's project-state record is written (mojo-io-state format). Restore it with the outputs." }
       }
     },

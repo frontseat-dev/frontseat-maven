@@ -45,20 +45,135 @@ public final class Inputs {
 
     /** The project's test classpath, for mojos that build it internally (surefire). */
     public static InputSpec testClasspath() {
+        return testClasspath(true);
+    }
+
+    /**
+     * @param ownOutputs false leaves out the project's own classes and test-classes directories: for
+     *                   mojos that only need the dependencies, or that run before those directories are
+     *                   built (their content would be whatever an earlier build left there)
+     */
+    public static InputSpec testClasspath(boolean ownOutputs) {
         return ctx -> {
             if (ctx.analysisOnly()) {
                 return List.of(ResolvedInput.classpath("testClasspath", List.of(), "test"));
             }
             List<Path> paths = new ArrayList<>();
             try {
-                for (String element : ctx.project().getTestClasspathElements()) {
-                    paths.add(Path.of(element));
+                Path classes = Path.of(ctx.project().getBuild().getOutputDirectory()).toAbsolutePath().normalize();
+                Path testClasses = Path.of(ctx.project().getBuild().getTestOutputDirectory()).toAbsolutePath().normalize();
+                List<Path> elements = ctx.testClasspath();
+                if (elements == null) {
+                    elements = new ArrayList<>();
+                    for (String element : ctx.project().getTestClasspathElements()) {
+                        elements.add(Path.of(element));
+                    }
                 }
+                for (Path element : elements) {
+                    Path path = element.toAbsolutePath().normalize();
+                    if (ownOutputs || !(path.equals(classes) || path.equals(testClasses))) {
+                        paths.add(element);
+                    }
+                }
+            } catch (NotCacheableException e) {
+                throw e;
             } catch (Exception e) {
                 throw new NotCacheableException("cannot compute test classpath: " + e.getMessage(), e);
             }
             return List.of(ResolvedInput.classpath("testClasspath", paths, "test"));
         };
+    }
+
+    /**
+     * The project's own files: everything in its directory except the build directory, the directories
+     * of other reactor projects (nested modules) and VCS data. For mojos that scan the project, such as
+     * license or format checks.
+     */
+    public static InputSpec projectFiles(List<String> excludes) {
+        return ctx -> {
+            Path basedir = ctx.project().getBasedir().toPath().toAbsolutePath().normalize();
+            // .mvn/target: where Maven 4 keeps its project-local repository in some layouts.
+            List<String> all = new ArrayList<>(List.of(".git/**", ".mvn/target/**"));
+            Path build = Path.of(ctx.project().getBuild().getDirectory()).toAbsolutePath().normalize();
+            if (build.startsWith(basedir) && !build.equals(basedir)) {
+                all.add(FileTrees.relative(basedir, build) + "/**");
+            }
+            List<String> modules = new ArrayList<>();
+            for (org.apache.maven.project.MavenProject other : ctx.session().getAllProjects()) {
+                if (other.getBasedir() == null) {
+                    continue;
+                }
+                Path dir = other.getBasedir().toPath().toAbsolutePath().normalize();
+                if (dir.startsWith(basedir) && !dir.equals(basedir)) {
+                    modules.add(FileTrees.relative(basedir, dir) + "/**");
+                }
+            }
+            java.util.Collections.sort(modules);
+            all.addAll(modules);
+            all.addAll(excludes);
+            return List.of(ResolvedInput.files("projectFiles", basedir, List.of(), all));
+        };
+    }
+
+    /**
+     * The project's effective model (its pom with parents, profiles and properties applied), for mojos
+     * that read the project rather than their own configuration, such as rule checks.
+     */
+    public static InputSpec projectModel() {
+        return ctx -> {
+            return List.of(ResolvedInput.value("projectModel", modelHash(ctx, ctx.project(), true)));
+        };
+    }
+
+    /**
+     * The effective models of every project of the build, for aggregator mojos (one execution that reads
+     * the whole reactor, such as an aggregate bill of materials).
+     */
+    public static InputSpec reactorModels() {
+        return ctx -> {
+            java.util.TreeMap<String, String> models = new java.util.TreeMap<>();
+            for (org.apache.maven.project.MavenProject p : ctx.session().getProjects()) {
+                // Without properties: other projects' mojos set them while this one is being built (in
+                // parallel builds, at no fixed moment), and the model's values are already interpolated.
+                models.put(p.getGroupId() + ":" + p.getArtifactId(), modelHash(ctx, p, false));
+            }
+            // An aggregator does its work in the project the build was started from.
+            return List.of(ResolvedInput.value("reactorModels", dev.frontseat.mojoio.cache.Hashing.sha256(
+                    models + " executionRoot=" + ctx.project().isExecutionRoot())));
+        };
+    }
+
+    /**
+     * The goals and phases the build was started with, for mojos whose result depends on them (a check
+     * of the build plan).
+     */
+    public static InputSpec sessionGoals() {
+        return ctx -> List.of(ResolvedInput.value("sessionGoals", String.valueOf(ctx.session().getGoals())));
+    }
+
+    private static String modelHash(ExecutionContext ctx, org.apache.maven.project.MavenProject project,
+                                    boolean withProperties) throws NotCacheableException {
+        // Properties are written apart and sorted: their order in the model is that of a hash table,
+        // which depends on how the table grew, not on its content.
+        org.apache.maven.model.Model model = project.getModel().clone();
+        java.util.TreeMap<String, String> properties = new java.util.TreeMap<>();
+        if (withProperties) {
+            model.getProperties().stringPropertyNames().forEach(k -> properties.put(k, model.getProperties().getProperty(k)));
+        }
+        model.setProperties(new java.util.Properties());
+        java.io.StringWriter out = new java.io.StringWriter();
+        try {
+            new org.apache.maven.model.io.xpp3.MavenXpp3Writer().write(out, model);
+        } catch (java.io.IOException e) {
+            throw new NotCacheableException("cannot serialize the project model: " + e.getMessage(), e);
+        }
+        return dev.frontseat.mojoio.cache.Hashing.sha256(ctx.normalizer().normalize(out + "\nproperties=" + properties));
+    }
+
+    /** The Maven version, for mojos whose result depends on it (a rule requiring a Maven version). */
+    public static InputSpec mavenVersion() {
+        return ctx -> List.of(ResolvedInput.value("mavenVersion",
+                ctx.session().getSystemProperties().getProperty("maven.version", "unknown")));
     }
 
     /**
@@ -147,7 +262,49 @@ public final class Inputs {
     }
 
     static List<Resource> resourceList(ExecutionContext ctx, String parameter) throws NotCacheableException {
-        return asResources(ctx.parameter(parameter), "parameter '" + parameter + "'");
+        Object value = ctx.parameter(parameter);
+        org.codehaus.plexus.util.xml.Xpp3Dom node = ctx.parameterNode(parameter);
+        if (node != null && node.getChildren("resource").length > 0
+                && !(value instanceof List<?> l && l.stream().allMatch(o -> o instanceof Resource))) {
+            return inlineResources(ctx, node);
+        }
+        return asResources(value, "parameter '" + parameter + "'");
+    }
+
+    /** Resources written out in the plugin configuration ({@code <resources><resource>…}). */
+    private static List<Resource> inlineResources(ExecutionContext ctx, org.codehaus.plexus.util.xml.Xpp3Dom node)
+            throws NotCacheableException {
+        List<Resource> resources = new ArrayList<>();
+        for (org.codehaus.plexus.util.xml.Xpp3Dom r : node.getChildren("resource")) {
+            Resource resource = new Resource();
+            for (org.codehaus.plexus.util.xml.Xpp3Dom field : r.getChildren()) {
+                switch (field.getName()) {
+                    case "directory" -> {
+                        Path dir = Path.of(String.valueOf(ctx.evaluateLeaf(field)));
+                        resource.setDirectory((dir.isAbsolute() ? dir
+                                : ctx.project().getBasedir().toPath().resolve(dir)).normalize().toString());
+                    }
+                    case "targetPath" -> resource.setTargetPath(String.valueOf(ctx.evaluateLeaf(field)));
+                    case "filtering" -> resource.setFiltering(String.valueOf(ctx.evaluateLeaf(field)));
+                    case "includes" -> {
+                        for (org.codehaus.plexus.util.xml.Xpp3Dom i : field.getChildren()) {
+                            resource.addInclude(String.valueOf(ctx.evaluateLeaf(i)));
+                        }
+                    }
+                    case "excludes" -> {
+                        for (org.codehaus.plexus.util.xml.Xpp3Dom e : field.getChildren()) {
+                            resource.addExclude(String.valueOf(ctx.evaluateLeaf(e)));
+                        }
+                    }
+                    default -> throw new NotCacheableException("resource setting <" + field.getName() + "> is not supported");
+                }
+            }
+            if (resource.getDirectory() == null) {
+                throw new NotCacheableException("a configured resource has no directory");
+            }
+            resources.add(resource);
+        }
+        return resources;
     }
 
     @SuppressWarnings("unchecked")

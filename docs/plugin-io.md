@@ -61,14 +61,41 @@ declarations only need to cover what that hash can't see:
 | `stamping="exact\|carry"` | Whether the mojo may act on stamp values such as the project version (`exact`, default) or only copies them into outputs (`carry`). See [versioning](versioning.md). |
 | `prerequisitePhase` | When the goal is invoked directly (`mvn surefire:test`), this phase runs or is restored first. |
 
+### Mojos that fork other goals
+
+Some mojos run another goal first, inside their own run: `pmd:check` forks `pmd:pmd`, `spotbugs:check`
+forks `spotbugs:spotbugs`. Such a mojo is cached as one unit with its forked executions:
+- declare each forked goal too (its inputs and outputs);
+- their configuration and inputs join the forking mojo's key, their outputs join its entry;
+- a hit runs neither.
+
+If a forked execution has no declaration (for example a forked lifecycle with undeclared mojos), the
+forking mojo isn't cached.
+
+### Checking a declaration
+
+[Strict mode](design.md#strict-mode) reports outputs a declaration misses. Nothing can report a missing
+**input**, and a missing input means stale hits. So for every new declaration:
+1. Build once and read `target/mojo-io/<plugin>-<goal>-<execution>.key.txt`. It lists every input with
+   what was hashed. An input that should list files but is empty is a gap: the parameter is probably
+   empty by default, and the mojo falls back to something else (declare that with `expression=`).
+2. Change each kind of input (a source file, each configuration file) and check that the mojo misses.
+
+[docs/real-projects.md](real-projects.md) has a worked example, including a first attempt that was wrong.
+
 ### Input kinds
 
 | Kind | Attributes | Hashes |
 |---|---|---|
 | `files` | `parameter` or `expression` | Content of the files/trees a path or path-list parameter names, or that a Maven expression such as `${project.file}` evaluates to. |
 | `classpath` | `parameter`, `excludeParameter?` | An ordered classpath, by content not location. `excludeParameter` skips an entry, usually the mojo's own output directory. |
-| `testClasspath` | – | The project's resolved test classpath. For mojos that build it internally. |
+| `testClasspath` | `ownOutputs?` | The project's test classpath, resolved for this input whatever the mojo asks Maven to resolve. For mojos that build it internally or read dependencies some other way. `ownOutputs="false"` leaves out the project's own classes and test-classes directories: for mojos that only need the dependencies, or run before those directories are built. |
 | `resources` | `parameter` or `expression` | A `List<Resource>`: settings plus selected files. With filtering, also project coordinates, project properties and user properties. |
+| `projectFiles` | `excludes?` | The project's own files: its directory without the build directory, nested modules and VCS data. For mojos that scan the project (license or format checks). |
+| `projectModel` | – | The project's effective model (pom with parents, profiles and properties applied). For mojos that read the project rather than their own configuration (rule checks). |
+| `reactorModels` | – | The effective models of every project of the build. For aggregator mojos (one execution that reads the whole reactor). An aggregator is only cached when its declaration has this input. |
+| `sessionGoals` | – | The goals and phases the build was started with. For mojos whose result depends on them (a check of the build plan). |
+| `mavenVersion` | – | The Maven version, for mojos whose result depends on it. |
 | `projectProperty` | `nameParameter?`, `defaultName` | The current value of a project property the mojo reads and rewrites. |
 
 ### Output kinds
