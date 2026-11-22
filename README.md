@@ -19,7 +19,9 @@ You don't need a Maven fork or a core patch, and you don't have to change your P
 
 ## For tool authors
 
-To integrate mojo-io with an orchestrator or cache:
+mojo-io is meant to be cached **by your build system** (Nx, Bazel, CI caches, …), not only by its
+built-in cache. To integrate it with an orchestrator or cache (the full recipe is in
+[task graph: caching Maven tasks](docs/task-graph.md#caching-maven-tasks-in-a-build-system)):
 1. **Read the graph.** Run `mvn verify -Dmojoio.graph.output=graph.json`. This is a dry run that
    describes every mojo execution without running any. The graph gives each execution's inputs,
    outputs, project dependencies and cacheability ([format](docs/task-graph.md)).
@@ -158,6 +160,7 @@ live service, drop a file in `.mvn/plugin-io/`:
 | `mojoio.cache.read` / `mojoio.cache.write` | `true` | E.g. `write=false` for a read-only CI consumer. |
 | `mojoio.strict` | `warn` | Strict mode: report files a declared mojo writes outside its declared outputs. Such executions are never cached; `fail` fails the build (use it in CI to enforce declarations); `off` disables the check. |
 | `mojoio.strict.cleanOutputs` | `false` | Delete declared outputs before a declared mojo runs, so leftovers (e.g. classes of deleted sources) never reach a cache entry. Opt-in, because some outputs are shared or appended to (JaCoCo's `destfile`). |
+| `mojoio.only` | unset | Comma-separated project ids. Other reactor projects replay their state but run no mojos: `-pl app -am -Dmojoio.only=app <invocation>` runs one task of `app` against its upstream modules' restored outputs. |
 | `mojoio.prerequisites` | `true` | Expand directly-invoked goals with their lifecycle prerequisites. |
 
 ### Why did it miss?
