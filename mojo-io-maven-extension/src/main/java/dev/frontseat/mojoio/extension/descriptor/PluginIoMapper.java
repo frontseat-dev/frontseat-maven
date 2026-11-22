@@ -67,8 +67,9 @@ final class PluginIoMapper {
 
     private static OutputSpec output(IoDeclaration d) {
         return switch (d.kind()) {
-            case "directory" -> Outputs.directory(d.required("parameter"),
-                    d.attribute("includes").orElse("**").split("\\s*,\\s*"));
+            case "directory" -> d.attribute("expression").isPresent()
+                    ? Outputs.directoryAt(d.required("expression"), d.attribute("includes").orElse("**").split("\\s*,\\s*"))
+                    : Outputs.directory(d.required("parameter"), d.attribute("includes").orElse("**").split("\\s*,\\s*"));
             case "file" -> Outputs.file(d.required("parameter"), d.required("name"));
             case "copiedResources" -> Outputs.copiedResources(d.required("resourcesParameter"),
                     d.required("outputDirectoryParameter"));

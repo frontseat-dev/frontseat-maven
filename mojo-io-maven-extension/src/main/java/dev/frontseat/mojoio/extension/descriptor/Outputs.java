@@ -32,6 +32,17 @@ public final class Outputs {
         };
     }
 
+    /** A directory a Maven expression evaluates to, e.g. {@code ${project.build.outputDirectory}}. */
+    public static OutputSpec directoryAt(String expression, String... includes) {
+        return ctx -> {
+            List<ResolvedOutput> result = new ArrayList<>();
+            for (Path dir : ctx.paths(ctx.evaluateExpression(expression))) {
+                result.add(new ResolvedOutput(expression, dir, List.of(includes), List.of()));
+            }
+            return result;
+        };
+    }
+
     /**
      * One file in the directory named by {@code parameter}. {@code nameTemplate} uses {@code {param}} for a
      * parameter's value and {@code {-param}} for {@code "-" + value} when the value is not empty, e.g.

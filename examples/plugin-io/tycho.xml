@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Declarations for Eclipse Tycho builds (Tycho 4 and 5). Copy into a project's .mvn/plugin-io/.
+  Verified on Tycho's RCP demo (docs/real-projects.md).
+
+  Tycho compiles from its own model: source folders and output from build.properties, the classpath
+  from the bundles p2 resolved for the MANIFEST.MF. The test classpath input covers those bundles by
+  their fully qualified versions (p2 never reuses a version for other content) and bundles of this
+  reactor by content.
+
+  A build qualifier is written into every manifest and feature.xml. With Tycho's default (the build
+  time) every build is new: use a fixed qualifier (forceContextQualifier) or one from git
+  (tycho-buildtimestamp-jgit), or nothing downstream of the qualifier can be reused.
+
+  Not covered: compiler settings from a target platform's execution environment that change without a
+  version change; extraClasspathElements given as dependencies (such a mojo runs uncached).
+-->
+<plugin-io xmlns="urn:mojo-io:plugin-io:1.0">
+  <plugin groupId="org.eclipse.tycho" artifactId="tycho-compiler-plugin">
+    <mojo goal="compile" stamping="carry">
+      <inputs>
+        <files expression="${project.compileSourceRoots}"/>
+        <files expression="${project.basedir}/META-INF/MANIFEST.MF"/>
+        <files expression="${project.basedir}/build.properties"/>
+        <!-- useProjectSettings: the project's JDT compiler preferences. -->
+        <files expression="${project.basedir}/.settings"/>
+        <testClasspath ownOutputs="false"/>
+      </inputs>
+      <outputs>
+        <!-- Classes and the resources copied from the source folders (copyResources). -->
+        <directory expression="${project.build.outputDirectory}"/>
+        <directory parameter="generatedSourcesDirectory"/>
+      </outputs>
+      <ignoredWrites>maven-status/**, compile-logs/**</ignoredWrites>
+    </mojo>
+    <mojo goal="testCompile" stamping="carry">
+      <inputs>
+        <files expression="${project.testCompileSourceRoots}"/>
+        <files expression="${project.basedir}/META-INF/MANIFEST.MF"/>
+        <files expression="${project.basedir}/build.properties"/>
+        <files expression="${project.basedir}/.settings"/>
+        <files expression="${project.build.outputDirectory}"/>
+        <testClasspath ownOutputs="false"/>
+      </inputs>
+      <outputs>
+        <directory expression="${project.build.testOutputDirectory}"/>
+        <directory parameter="generatedSourcesDirectory"/>
+      </outputs>
+      <ignoredWrites>maven-status/**, compile-logs/**</ignoredWrites>
+    </mojo>
+  </plugin>
+
+  <plugin groupId="org.eclipse.tycho" artifactId="tycho-packaging-plugin">
+    <!-- Checks on the project model: version format and the bundle's id. -->
+    <mojo goal="validate-version">
+      <inputs>
+        <projectModel/>
+      </inputs>
+    </mojo>
+    <mojo goal="validate-id">
+      <inputs>
+        <projectModel/>
+        <files expression="${project.basedir}/META-INF/MANIFEST.MF"/>
+        <files expression="${project.basedir}/feature.xml"/>
+      </inputs>
+    </mojo>
+  </plugin>
+</plugin-io>

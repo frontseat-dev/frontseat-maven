@@ -131,7 +131,9 @@
       <!-- Files under a directory parameter matching Ant-style includes (default: everything). -->
       <xs:element name="directory">
         <xs:complexType>
-          <xs:attribute name="parameter" type="xs:string" use="required"/>
+          <!-- Exactly one of parameter and expression (e.g. "${project.build.outputDirectory}"). -->
+          <xs:attribute name="parameter" type="xs:string"/>
+          <xs:attribute name="expression" type="xs:string"/>
           <xs:attribute name="includes" type="xs:string" default="**"/>
         </xs:complexType>
       </xs:element>

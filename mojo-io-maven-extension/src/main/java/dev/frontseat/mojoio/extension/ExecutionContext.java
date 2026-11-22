@@ -41,13 +41,19 @@ public final class ExecutionContext {
         this.evaluator = new PluginParameterExpressionEvaluator(session, execution);
     }
 
+    /**
+     * A resolved classpath: files hashed by content, and entries identified by an immutable version
+     * instead (see {@link dev.frontseat.mojoio.extension.DependencyResolution#testClasspath}).
+     */
+    public record Classpath(List<java.nio.file.Path> paths, List<String> versioned) {}
+
     /** How to resolve the project's test classpath on demand (absent in unit tests and graph export). */
     public interface TestClasspath {
-        List<java.nio.file.Path> resolve() throws NotCacheableException;
+        Classpath resolve() throws NotCacheableException;
     }
 
     private TestClasspath testClasspath;
-    private List<java.nio.file.Path> resolvedTestClasspath;
+    private Classpath resolvedTestClasspath;
 
     public ExecutionContext withTestClasspath(TestClasspath resolver) {
         this.testClasspath = resolver;
@@ -59,7 +65,7 @@ public final class ExecutionContext {
     }
 
     /** The resolved test classpath, or {@code null} when this context cannot resolve one itself. */
-    public List<java.nio.file.Path> testClasspath() throws NotCacheableException {
+    public Classpath testClasspath() throws NotCacheableException {
         if (testClasspath == null) {
             return null;
         }

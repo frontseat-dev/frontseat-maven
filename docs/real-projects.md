@@ -152,27 +152,35 @@ Notes:
 Tycho builds Eclipse plugins, features and products with its own packaging types, a target platform
 resolved from p2 repositories, and its own plugins (`tycho-compiler`, `tycho-packaging`,
 `tycho-p2-*`). Trial on Tycho's RCP demo (`demo/itp04-rcp` in eclipse-tycho/tycho, Tycho 5.0.1;
-7 projects: a bundle, two features, root files, a p2 repository with a product):
+7 projects: a bundle, two features, root files, a p2 repository with a product), with
+[`examples/plugin-io/tycho.xml`](../examples/plugin-io/tycho.xml) and a fixed qualifier
+(`-DforceContextQualifier=v1`):
 
 | Build | Plain Maven | mojo-io |
 |---|---|---|
-| `clean verify` | 17s | 18s, empty cache |
-| `clean verify`, warm | | 18s |
+| `clean verify` | 22s | 23s, empty cache |
+| `clean verify`, warm | | 22–25s, all 19 declared executions restored |
 
-- **Correct:** with a fixed build qualifier (`-DforceContextQualifier=v1`), the jars, `feature.xml`
-  files and test results are identical to plain Maven after clean and after non-clean builds. The
-  extension doesn't get in Tycho's way: nothing fails and nothing is replayed wrongly.
-- **Nothing to gain yet:** 60 of the 67 executions are Tycho's own plugins, and none is declared. Only
-  `resources:resources` is cached. Most of the time goes to resolving the target platform, which Tycho
-  does while loading the projects, before any mojo runs: no mojo cache can skip that.
-- **Build qualifiers are timestamps.** Tycho's default qualifier is the build time, written into every
-  manifest and `feature.xml`. Two plain builds a minute apart already differ, so outputs can only be
-  compared, or cached, with a fixed qualifier (`forceContextQualifier`) or one taken from git
+- **Correct:** jars, `feature.xml` files and test results are identical to plain Maven after clean and
+  non-clean builds.
+- **Invalidation:** a changed Java source and a changed `MANIFEST.MF` (a new required bundle) each make
+  `tycho-compiler:compile` miss; reverting them hits again.
+- **What made it work:**
+  - Tycho adds the bundles it resolved as system-scoped dependencies (`p2.eclipse.plugin:…`) with fully
+    qualified versions, but their files are placeholders with random names until Tycho fetches them.
+    The test classpath input now identifies such bundles by version, and bundles of the reactor by
+    content. The project model input ignores the placeholder paths.
+  - A `directory` output can be an expression: Tycho's compiler has no `outputDirectory` parameter.
+- **No time saved on this demo.** Its compile is tiny, and most of a Tycho build goes to resolving the
+  target platform while the projects load, before any mojo runs: no mojo cache can skip that. The
+  gain grows with the amount of compiling and testing.
+- **Build qualifiers are timestamps by default.** Tycho writes the build time into every manifest and
+  `feature.xml`, so each build is new. Use a fixed qualifier or one from git
   (`tycho-buildtimestamp-jgit`).
-- **What declaring Tycho would take:** `tycho-compiler` gets its classpath from Tycho's p2 resolution,
-  not from Maven's dependency resolution, so it needs an input kind for Tycho's resolved target
-  platform. Packaging and p2 mojos read the project's `MANIFEST.MF`, `build.properties` and
-  `feature.xml`, which the existing input kinds can express.
+- **Still undeclared:** packaging and p2 publishing mojos (`package-plugin`, `package-feature`,
+  `p2-metadata`, `assemble-repository`, `materialize-products`, …) and `build-qualifier`, which reads
+  the clock. They're cheap next to compiling and testing, but a build system that caches whole tasks
+  can't cache a package stage of a Tycho project yet.
 
 ## Reproducing it
 
