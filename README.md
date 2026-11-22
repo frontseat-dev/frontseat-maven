@@ -23,6 +23,9 @@ On a 20-module reactor: a cold build costs about **6%** more than raw Maven. A w
 build **5.8× faster** with mvn and **20× faster** with mvnd (0.6s). One build-system task takes 0.6s
 through mvnd. Details in [docs/performance.md](docs/performance.md).
 
+On a real project (Apache Commons Numbers, 14 modules), a warm `clean verify` takes 5s against 132s
+for plain Maven, with identical outputs: [docs/real-projects.md](docs/real-projects.md).
+
 ## For tool authors
 
 mojo-io is meant to be cached **by your build system** (Nx, Bazel, CI caches, …), not only by its
@@ -73,6 +76,8 @@ storing an entry, the mojo just runs.
 - ✅ **verified**: declared, and exercised end to end by the integration tests on both Maven lines.
 - 🟡 **declared**: a declaration exists and every parameter it references exists in the listed
   versions (checked against each version's `plugin.xml`), but there's no end-to-end IT for it.
+- 📄 **example declaration**: not built in; copy the file into `.mvn/plugin-io/`. Verified on a real
+  project ([docs/real-projects.md](docs/real-projects.md)).
 - ⛔ **not cacheable**: has side effects outside the project, so it always runs, by design.
 - ➖ **not yet**: no declaration, so it always runs.
 
@@ -83,9 +88,28 @@ storing an entry, the mojo just runs.
 | `maven-surefire-plugin` | `test` | ✅ | 3.5.2 | 2.22.2, 3.0.0, 3.2.5, 3.5.2, 3.5.4 | reports, JaCoCo `destfile` | `exact`. Tests that use the network, a DB, env vars or files outside the project get cached too: override with `.mvn/plugin-io/`. With `testFailureIgnore`, failures are cached. |
 | `maven-failsafe-plugin` | `integration-test`, `verify` | ✅ | 3.5.2 | 2.22.2, 3.0.0, 3.2.5, 3.5.2, 3.5.4 | reports, summary | `exact`. Integration tests often reach outside the project; mark them `cacheable="false"` in `.mvn/plugin-io/` if yours do. |
 | `maven-jar-plugin` | `jar`, `test-jar` | ✅ | 3.4.2 | 3.2.2, 3.3.0, 3.4.1, 3.4.2 | the jar, artifact file / attached artifact | `carry`: after a version bump the restored jar is renamed and its `pom.properties`, pom and manifest are restamped. |
-| `maven-source-plugin` | `jar-no-fork` | ✅ | 3.3.1 | 3.2.1, 3.3.0, 3.3.1 | sources jar, attached artifact | `carry`. The forking `jar` goal is not cacheable (forks a lifecycle); use `jar-no-fork`. |
+| `maven-source-plugin` | `test-jar-no-fork` | ✅ | 3.3.1 | 3.2.1, 3.3.0, 3.3.1 | test sources jar, attached artifact | `carry`. |
+| `maven-resources-plugin` | `copy-resources` | 🟡 | | 3.1.0 – 3.3.1 | copied files | `carry`. Resources written in the plugin configuration are supported. |
+| `build-helper-maven-plugin` | `parse-version`, `regex-property`, `regex-properties` | ✅ (`parse-version`) | 3.6.1 | 3.6.0, 3.6.1 | project properties | Only compute properties from their configuration. |
+| `maven-source-plugin` | `jar-no-fork` | ✅ | 3.3.1 | 3.2.1, 3.3.0, 3.3.1 | sources jar, attached artifact | `carry`. The forking `jar` goal is not cacheable (it forks a lifecycle with undeclared mojos); use `jar-no-fork`. |
 | `jacoco-maven-plugin` | `prepare-agent` | ✅ | 0.8.12 | 0.8.7, 0.8.10, 0.8.12, 0.8.13, 0.8.14 | `argLine` | A hit requires the agent jar in the local repository; otherwise it counts as a miss. |
+| `jacoco-maven-plugin` | `check` | ✅ | 0.8.12 | 0.8.7, 0.8.10, 0.8.12, 0.8.13, 0.8.14 | nothing (fails the build when rules aren't met) | Hits while the coverage data and classes are unchanged. |
 | `jacoco-maven-plugin` | `report` | ✅ | 0.8.12 | 0.8.7, 0.8.10, 0.8.12, 0.8.13, 0.8.14 | `site/jacoco` | `exact`. Hits whenever the coverage data is unchanged (e.g. tests restored from the cache). |
+| `maven-checkstyle-plugin` | `check` | 📄 | | 3.6.0 | `checkstyle-result.xml` | Copy [`examples/plugin-io/static-analysis.xml`](examples/plugin-io/static-analysis.xml). Covers the configuration files the plugin points at directly; read the file's notes first. |
+| `spotbugs-maven-plugin` | `check` (forks `spotbugs`) | 📄 | | 4.10.4.0 | SpotBugs reports | Same file. Cached as one unit with the forked `spotbugs` goal. |
+| `maven-pmd-plugin` | `check` (forks `pmd`) | 📄 | 3.28.0 (`ForkedGoalsIT`) | 3.28.0 | `pmd.xml` | Same file. Cached as one unit with the forked `pmd` goal. |
+| `maven-enforcer-plugin` | `enforce` | 📄 | | 3.6.3 | nothing | Copy [`examples/plugin-io/common-plugins.xml`](examples/plugin-io/common-plugins.xml). Covers rules on the project, the Maven version and the JDK; not rules that read the environment or files. |
+| `apache-rat-plugin` | `check` | 📄 | | 0.18 | `rat.txt` | Same file. Input: all of the project's own files. |
+| `maven-artifact-plugin` | `check-buildplan` | 📄 | | | nothing | Same file. |
+| `maven-remote-resources-plugin` | `process` | 📄 | | 3.3.0 | generated resources | Same file. An execution that adds a resource directory to the project runs uncached. |
+| `maven-bundle-plugin` | `manifest` | 📄 | | | the OSGi manifest | Same file. |
+| `maven-site-plugin` | `attach-descriptor` | 📄 | | 3.22.0 | site descriptor, attached artifact | Same file. |
+| `maven-changes-plugin` | `changes-validate` | 📄 | | 3.0.0-M3 | nothing | Same file. |
+| `japicmp-maven-plugin` | `cmp` | 📄 | | 0.26.2 | `japicmp/` reports | Same file. Input: the built jar; the old version comes from the configuration. |
+| `cyclonedx-maven-plugin` | `makeAggregateBom` | 📄 | | 2.9.3 | the aggregate BOM | Same file. An aggregator: cached because the declaration covers the whole reactor (`reactorModels`). Needs network access. |
+| `spdx-maven-plugin` | `createSPDX` | 📄 | | | the SPDX document | Same file. |
+| `moditect-maven-plugin` | `add-module-info` | 📄 | | | the rewritten jar | Same file. |
+| `maven-antrun-plugin` | `run` | 📄 | | | whatever it writes | An Ant script can do anything: declare it per project, for one known script ([example](examples/plugin-io/apache-commons-parent.xml)). |
 | `maven-javadoc-plugin` | `javadoc`, `jar` | ➖ | | | | |
 | `maven-clean-plugin` | `clean` | ⛔ | | | | Deletes outputs; nothing to cache. |
 | `maven-install-plugin` | `install` | ⛔ | | | | Writes to the local repository; works from replayed state (artifact file + attachments). |
@@ -129,7 +153,7 @@ mise tasks              # list tasks
 
 ## Use it in a project
 
-After `mise run install`, add `.mvn/extensions.xml` to any Maven 3.9+ or 4 project:
+After `mise run install` (or with a [published version](#published-versions)), add `.mvn/extensions.xml` to any Maven 3.9+ or 4 project:
 
 ```xml
 <extensions>
@@ -162,13 +186,14 @@ live service, drop a file in `.mvn/plugin-io/`:
 | `mojoio.enabled` | `true` | Master switch. |
 | `mojoio.state.enabled` | `true` | Record project-state files in `target/mojo-io/state/` and replay them for executions that don't run. |
 | `mojoio.graph.output` | unset | Write the task graph to this file instead of running mojos (dry run). |
+| `mojoio.graph.granularity` | `stage` | How the graph groups a project's executions into tasks: `phase`, `stage` (compile, test, package, verify) or `module`. Fewer, bigger tasks mean fewer Maven invocations for a build system ([task graph](docs/task-graph.md#granularity)). |
 | `mojoio.cache.enabled` | `true` | The built-in local cache. |
 | `mojoio.stamp.properties` | unset | Extra stamp values besides `project.version`, e.g. `buildNumber,git.commit.id` ([versioning](docs/versioning.md)). |
 | `mojoio.cache.dir` | `~/.m2/mojo-io-cache` | Local cache location. |
 | `mojoio.cache.read` / `mojoio.cache.write` | `true` | E.g. `write=false` for a read-only CI consumer. |
 | `mojoio.strict` | `warn` | Strict mode: report files a declared mojo writes outside its declared outputs. Such executions are never cached; `fail` fails the build (use it in CI to enforce declarations); `off` disables the check. |
 | `mojoio.strict.cleanOutputs` | `false` | Delete declared outputs before a declared mojo runs, so leftovers (e.g. classes of deleted sources) never reach a cache entry. Opt-in, because some outputs are shared or appended to (JaCoCo's `destfile`). |
-| `mojoio.only` | unset | Comma-separated project ids. Other reactor projects replay their state but run no mojos: `-pl app -am -Dmojoio.only=app <invocation>` runs one task of `app` against its upstream modules' restored outputs. |
+| `mojoio.only` | unset | Comma-separated project ids. Other reactor projects run no mojos; their recorded state is replayed as far as the selected project's goals need it ([rules](docs/state-format.md#replay-rules)): `-pl app -am -Dmojoio.only=app <invocation>` runs one task of `app` against its upstream modules' restored outputs. |
 | `mojoio.prerequisites` | `true` | Expand directly-invoked goals with their lifecycle prerequisites. |
 
 ### Why did it miss?
@@ -176,6 +201,54 @@ live service, drop a file in `.mvn/plugin-io/`:
 Every cacheable execution writes its key's inputs, and which declaration was used, to
 `target/mojo-io/<plugin>-<goal>-<executionId>.key.txt`. The cache keeps a copy per key under
 `<cache>/keys/`. To see which input changed, diff two of them.
+
+## Published versions
+
+Releases go to **GitHub Packages** (`.github/workflows/release.yml`):
+
+- **A release:** push a tag `v1.2.3`, or run the *Release* workflow manually with a version.
+- **A snapshot:** run the workflow without a version, or push a commit whose message contains
+  `[publish-snapshot]`.
+
+Published: `mojo-io-parent`, `mojo-io-spec`, `mojo-io-cache`, `mojo-io-maven-extension` and the REAPI
+adapter `mojo-io-reapi`, all in group `dev.frontseat.mojoio`.
+
+GitHub Packages asks for a token even to read, and a core extension is resolved from the repositories
+of your `settings.xml`, so a project that uses a published version needs:
+
+```xml
+<settings>
+  <servers>
+    <server>
+      <id>github</id>
+      <username>YOUR_GITHUB_USER</username>
+      <password>A_TOKEN_WITH_read:packages</password>
+    </server>
+  </servers>
+  <profiles>
+    <profile>
+      <id>mojo-io</id>
+      <repositories>
+        <repository>
+          <id>github</id>
+          <url>https://maven.pkg.github.com/frontseat-dev/frontseat-maven</url>
+          <snapshots><enabled>true</enabled></snapshots>
+        </repository>
+      </repositories>
+      <pluginRepositories>
+        <pluginRepository>
+          <id>github</id>
+          <url>https://maven.pkg.github.com/frontseat-dev/frontseat-maven</url>
+          <snapshots><enabled>true</enabled></snapshots>
+        </pluginRepository>
+      </pluginRepositories>
+    </profile>
+  </profiles>
+  <activeProfiles>
+    <activeProfile>mojo-io</activeProfile>
+  </activeProfiles>
+</settings>
+```
 
 ## Repository layout
 
@@ -186,7 +259,10 @@ Every cacheable execution writes its key's inputs, and which declaration was use
 | `mojo-io-maven-extension` | The core extension: execution strategy, declaration lookup, project-state diff, prerequisites. |
 | `mojo-io-it` | Integration tests that fork real Maven 3.9 / 4 builds of the projects in `src/it/projects`. |
 | `mise.toml`, `mise-tasks/` | Toolchain and tasks. |
-| `docs/` | [Design notes](docs/design.md), [performance](docs/performance.md), [versioning](docs/versioning.md), formats ([plugin-io](docs/plugin-io.md), [task graph](docs/task-graph.md), [state](docs/state-format.md)), [Maven 4 proposal](docs/maven4-proposal.md). |
+| `adapters/nx` | [@mojo-io/nx](adapters/nx/README.md): an Nx plugin built on the graph. An adapter outside the core, with an e2e proof of correctness and speed. |
+| `adapters/reapi` | [REAPI adapter](adapters/reapi/README.md): runs each task as a Remote Execution API action. Proven end to end against Buildbarn. |
+| `examples/plugin-io` | Declarations to copy into a project (static-analysis checks). |
+| `docs/` | [Design notes](docs/design.md), [performance](docs/performance.md), [a real-project trial](docs/real-projects.md), [versioning](docs/versioning.md), formats ([plugin-io](docs/plugin-io.md), [task graph](docs/task-graph.md), [state](docs/state-format.md)), [Maven 4 proposal](docs/maven4-proposal.md). |
 
 ## Development
 
