@@ -23,14 +23,25 @@ import org.apache.maven.execution.MavenSession;
  *       fails the build.</li>
  *   <li>{@code mojoio.strict.cleanOutputs} (default {@code false}): delete declared outputs before a
  *       declared mojo runs, so leftovers (e.g. classes of deleted sources) never reach an entry.</li>
+ *   <li>{@code mojoio.only} (default unset): comma-separated project ids ({@code groupId:artifactId} or
+ *       {@code artifactId}). Other projects in the reactor replay their state but run no mojos, so
+ *       {@code -pl app -am -Dmojoio.only=app} builds only {@code app} against its upstream modules'
+ *       restored outputs (how an external build system runs one task).</li>
  *   <li>{@code mojoio.prerequisites} (default {@code true}): when a goal such as
  *       {@code surefire:test} is invoked directly, first run (or restore) the lifecycle it depends on.</li>
  * </ul>
  */
 public record MojoIoConfig(boolean enabled, boolean state, Path graphOutput, boolean cache, Path cacheDir,
-                           boolean read, boolean write, boolean prerequisites, Strict strict, boolean cleanOutputs) {
+                           boolean read, boolean write, boolean prerequisites, Strict strict, boolean cleanOutputs,
+                           java.util.Set<String> only) {
 
     public enum Strict { OFF, WARN, FAIL }
+
+    /** Whether {@code project}'s mojos should run (see {@code mojoio.only}). */
+    public boolean runs(org.apache.maven.project.MavenProject project) {
+        return only.isEmpty() || only.contains(project.getArtifactId())
+                || only.contains(project.getGroupId() + ":" + project.getArtifactId());
+    }
 
     public static MojoIoConfig from(MavenSession session) {
         Properties user = session.getUserProperties();
@@ -50,7 +61,9 @@ public record MojoIoConfig(boolean enabled, boolean state, Path graphOutput, boo
                 bool(user, system, "mojoio.cache.write", true),
                 bool(user, system, "mojoio.prerequisites", true),
                 Strict.valueOf(get(user, system, "mojoio.strict", "warn").toUpperCase(java.util.Locale.ROOT)),
-                bool(user, system, "mojoio.strict.cleanOutputs", false));
+                bool(user, system, "mojoio.strict.cleanOutputs", false),
+                java.util.Set.of(get(user, system, "mojoio.only", "").split("\\s*,\\s*")).stream()
+                        .filter(x -> !x.isBlank()).collect(java.util.stream.Collectors.toUnmodifiableSet()));
     }
 
     private static String get(Properties user, Properties system, String name, String def) {

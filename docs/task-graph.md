@@ -25,10 +25,14 @@ the goals you want described; `verify` covers the default lifecycle up to packag
     "id": "com.example:app", "version": "1.0", "path": "app", "packaging": "jar",
     "dependsOn": ["com.example:parent", "com.example:lib-core"],   // reactor edges
     "poms": ["{projectRoot}/pom.xml", "{workspaceRoot}/pom.xml"],   // pom and in-workspace ancestors
+    "externalDependencies": ["org.junit.jupiter:junit-jupiter-api:jar:5.11.4:test", "…"],
     "executions": [{                                                // in execution order
       "id": "org.apache.maven.plugins:maven-compiler-plugin:3.13.0:compile@default-compile",
       "plugin": "org.apache.maven.plugins:maven-compiler-plugin", "version": "3.13.0",
       "goal": "compile", "executionId": "default-compile", "phase": "compile",
+      "invocation": "org.apache.maven.plugins:maven-compiler-plugin:3.13.0:compile@default-compile",
+      "runTogether": null,                 // or e.g. "integration-test" for a phase and its hooks
+      "fingerprint": "9f2c…",              // config + plugin + JDK + values; null if not cacheable
       "declaredBy": "built-in",            // or "plugin …", "project .mvn/plugin-io/x.xml", or null
       "stamping": "carry",                 // "exact": the version is an input; "carry": only copied (docs/versioning.md)
       "cacheable": true, "reason": null,
@@ -70,10 +74,41 @@ the in-memory project; the extension replays it in later builds (see [state form
 Without it, a restored `target/` can be unusable: for example, a downstream module can no longer
 resolve its upstream module, and JaCoCo's agent isn't attached.
 
+## Caching Maven tasks in a build system
+
+What a build system (Nx, Bazel, Turborepo, a CI cache, …) needs, all in the graph:
+
+1. **Tasks.** Group a project's executions by `phase`. Executions sharing a `runTogether` value (a phase
+   with its `pre-`/`post-` or Maven 4 `before:`/`after:` hooks) **must** be one task. Hooks hold
+   process-local state: a server started in `pre-integration-test` dies with that Maven process.
+2. **Task hash.** Combine:
+   - the members' `fingerprint`s, which cover what the build system can't hash itself (evaluated
+     plugin configuration, plugin version and dependencies, JDK, value inputs);
+   - the `files` inputs;
+   - `poms` and `externalDependencies`;
+   - the hashes of the `dependsOn` projects' tasks (that's the classpath);
+   - the previous task of the same project.
+   In Nx, put the fingerprints into the task's options, which Nx hashes.
+3. **Cache.** Store each member's `outputs` and its `stateFile`. On a hit, copy them back.
+4. **Run one task.** Run
+   `mvn -pl <id> -am -Dmojoio.only=<id> -Dmojoio.prerequisites=false -Dmojoio.cache.enabled=false <invocation>...`.
+   - `-am` puts the upstream projects in the reactor, so their restored outputs resolve.
+   - `mojoio.only` makes sure only this project's mojos run.
+   - The extension replays the recorded state of everything that doesn't run: artifact files,
+     attachments, generated source roots, properties like JaCoCo's `argLine`.
+
+Fingerprints include stamp values such as the project version, because a build system restores outputs
+byte for byte and can't rewrite the version inside them.
+
+`ExternalBuildSystemIT` does exactly this, with a small reference implementation
+(`ReferenceBuildSystem`) and mojo-io's own cache switched off. A fresh checkout is restored entirely from
+the build system's cache, and editing one test re-runs exactly that project's `test-compile` and `test`.
+`HookBracketsIT` shows that splitting a hook bracket breaks the integration tests.
+
 ### Granularity
 
 The graph is per mojo execution. Orchestrators that start one Maven process per task will usually
-group the executions of one project and phase into one task:
+group the executions of one project and phase (or `runTogether` group) into one task:
 - **Cacheable** only if every member execution is.
 - **Inputs and outputs** are the union of its members', minus files produced by earlier members of
   the same group.

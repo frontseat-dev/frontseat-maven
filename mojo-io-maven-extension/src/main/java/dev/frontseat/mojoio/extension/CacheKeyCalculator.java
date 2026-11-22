@@ -81,6 +81,29 @@ final class CacheKeyCalculator {
         return Hashing.sha256("includes=" + input.includes() + " excludes=" + input.excludes() + " " + sb);
     }
 
+    /**
+     * What an external build system cannot hash itself: plugin coordinates and dependencies, goal, JDK,
+     * the evaluated configuration (minus parameters covered by file inputs) and value inputs. Files and
+     * classpaths are left to the build system, which hashes them its own way. Stamp values stay in
+     * (the build system restores outputs byte for byte, so a version bump must change the fingerprint).
+     */
+    static String fingerprint(ExecutionContext ctx, MojoCacheDescriptor descriptor) throws NotCacheableException {
+        MojoExecution m = ctx.execution();
+        CacheKey key = new CacheKey();
+        key.add("mojo", mojoId(m));
+        key.add("pluginDependencies", pluginDependencies(m.getPlugin()));
+        key.add("jdk", System.getProperty("java.vendor") + " " + System.getProperty("java.runtime.version"));
+        key.add("configuration", ConfigurationHasher.render(ctx, descriptor.ignoredParameters()));
+        for (InputSpec spec : descriptor.inputs()) {
+            for (ResolvedInput input : spec.resolve(ctx)) {
+                if (input.kind() == ResolvedInput.Kind.VALUE) {
+                    key.add("input." + input.name(), input.value() == null ? "null" : input.value());
+                }
+            }
+        }
+        return key.hash();
+    }
+
     static String mojoId(MojoExecution m) {
         return m.getGroupId() + ":" + m.getArtifactId() + ":" + m.getVersion() + ":" + m.getGoal();
     }
