@@ -6,6 +6,7 @@
 min_version = "2025.1.0"
 
 [tools]
+node = "22"
 java = "temurin-21"
 # The first Maven is the one on PATH and builds this repo. The second is used only as the Maven the
 # integration tests fork (`mise run it:maven4`), to keep the extension working on both lines.
@@ -58,6 +59,14 @@ run = "java registry/Check.java"
 [tasks.perf]
 description = "Benchmark raw Maven vs mojo-io (and mvnd) on a generated 20-module project"
 run = "java perf/Bench.java"
+
+[tasks."e2e:reapi"]
+description = "REAPI adapter end to end against a running Buildbarn (adapters/reapi/e2e/buildbarn/start.sh; needs `mise run install`)"
+run = ["mvn -q -f adapters/reapi/pom.xml package", "java adapters/reapi/e2e/Run.java"]
+
+[tasks."e2e:nx"]
+description = "Nx adapter end to end: correctness against raw Maven and speed (needs `mise run install`)"
+run = "node adapters/nx/e2e/run.mjs"
 
 [tasks.ci]
 description = "Everything CI checks: ITs on Maven 3.9, on Maven 4, and through mvnd"
