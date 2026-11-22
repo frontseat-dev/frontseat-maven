@@ -19,6 +19,7 @@ import java.util.List;
  * <pre>
  * mojo-io-state 1
  * execution org.apache.maven.plugins:maven-compiler-plugin:3.13.0:compile@default-compile
+ * phase compile                                  (the lifecycle phase it is bound to, if any)
  * change compileSourceRoot % @@BASEDIR@@/target/generated-sources/annotations
  * incomplete execution attached artifacts        (only when not replayable)
  * </pre>
@@ -27,12 +28,17 @@ import java.util.List;
  * changes cannot all be expressed is written with an {@code incomplete} reason; consumers must not
  * replay it and should treat the execution as not restorable.
  */
-public record StateFile(String execution, List<StateChange> changes, String incompleteReason) {
+public record StateFile(String execution, String phase, List<StateChange> changes, String incompleteReason) {
 
     public static final String HEADER = "mojo-io-state 1";
 
     public StateFile {
         changes = List.copyOf(changes);
+    }
+
+    /** Without a lifecycle phase (an execution that is bound to none). */
+    public StateFile(String execution, List<StateChange> changes, String incompleteReason) {
+        this(execution, null, changes, incompleteReason);
     }
 
     public boolean complete() {
@@ -42,6 +48,9 @@ public record StateFile(String execution, List<StateChange> changes, String inco
     public String encode() {
         StringBuilder sb = new StringBuilder(HEADER).append('\n');
         sb.append("execution ").append(enc(execution)).append('\n');
+        if (phase != null) {
+            sb.append("phase ").append(enc(phase)).append('\n');
+        }
         for (StateChange c : changes) {
             sb.append("change ").append(enc(c.kind())).append(' ').append(enc(c.name())).append(' ')
               .append(enc(c.value())).append('\n');
@@ -59,6 +68,7 @@ public record StateFile(String execution, List<StateChange> changes, String inco
         }
         String execution = null;
         String incomplete = null;
+        String phase = null;
         List<StateChange> changes = new ArrayList<>();
         for (int i = 1; i < lines.length; i++) {
             if (lines[i].isBlank()) {
@@ -67,12 +77,13 @@ public record StateFile(String execution, List<StateChange> changes, String inco
             String[] p = lines[i].split(" ");
             switch (p[0]) {
                 case "execution" -> execution = dec(p[1]);
+                case "phase" -> phase = dec(p[1]);
                 case "change" -> changes.add(new StateChange(dec(p[1]), dec(p[2]), dec(p[3])));
                 case "incomplete" -> incomplete = dec(p[1]);
                 default -> throw new IllegalArgumentException("Unknown state line: " + lines[i]);
             }
         }
-        return new StateFile(execution, changes, incomplete);
+        return new StateFile(execution, phase, changes, incomplete);
     }
 
     public void write(Path file) {

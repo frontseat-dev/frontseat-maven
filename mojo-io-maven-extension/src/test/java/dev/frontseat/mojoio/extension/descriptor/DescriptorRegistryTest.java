@@ -36,6 +36,12 @@ class DescriptorRegistryTest {
         assertEquals(Set.of(
                 "org.apache.maven.plugins:maven-resources-plugin:resources",
                 "org.apache.maven.plugins:maven-resources-plugin:testResources",
+                "org.apache.maven.plugins:maven-resources-plugin:copy-resources",
+                "org.apache.maven.plugins:maven-source-plugin:test-jar-no-fork",
+                "org.codehaus.mojo:build-helper-maven-plugin:parse-version",
+                "org.codehaus.mojo:build-helper-maven-plugin:regex-property",
+                "org.codehaus.mojo:build-helper-maven-plugin:regex-properties",
+                "org.jacoco:jacoco-maven-plugin:check",
                 "org.apache.maven.plugins:maven-compiler-plugin:compile",
                 "org.apache.maven.plugins:maven-compiler-plugin:testCompile",
                 "org.apache.maven.plugins:maven-surefire-plugin:test",
@@ -87,5 +93,22 @@ class DescriptorRegistryTest {
                 new ByteArrayInputStream(xml.getBytes(StandardCharsets.UTF_8)), "test"), "test").get("g:a:x");
         assertFalse(d.cacheable());
         assertTrue(d.notCacheableReason().contains("unknown input kind <network>"));
+    }
+
+    /** An aggregator mojo may only be cached when its declaration covers the reactor. */
+    @Test
+    void reactorModelsMarksADeclarationAsReactorWide() {
+        String xml = """
+                <plugin-io xmlns="urn:mojo-io:plugin-io:1.0">
+                  <plugin groupId="g" artifactId="a">
+                    <mojo goal="aggregate"><inputs><reactorModels/></inputs></mojo>
+                    <mojo goal="single"><inputs><projectModel/></inputs></mojo>
+                  </plugin>
+                </plugin-io>
+                """;
+        Map<String, MojoCacheDescriptor> index = DescriptorRegistry.index(
+                PluginIoReader.read(new java.io.ByteArrayInputStream(xml.getBytes(java.nio.charset.StandardCharsets.UTF_8)), "test"), "test");
+        assertTrue(index.get("g:a:aggregate").reactorWide());
+        assertFalse(index.get("g:a:single").reactorWide());
     }
 }

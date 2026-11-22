@@ -45,8 +45,9 @@ public final class LocalCache {
         try {
             CacheEntry entry = CacheEntry.decode(Files.readString(entryFile, StandardCharsets.UTF_8));
             for (CacheEntry.OutputFile f : entry.files()) {
-                if (!Files.isRegularFile(blobPath(f.hash()))) {
-                    return Optional.empty(); // incomplete entry, treat as a miss
+                Path blob = blobPath(f.hash());
+                if (!Files.isRegularFile(blob) || Files.size(blob) != f.size()) {
+                    return Optional.empty(); // incomplete or damaged entry: a miss
                 }
             }
             return Optional.of(entry);
@@ -83,16 +84,22 @@ public final class LocalCache {
         List<CacheEntry.OutputFile> outputs = new ArrayList<>();
         try {
             for (StoredFile e : files) {
-                Path source = e.source();
-                String hash = Hashing.sha256(source);
+                // Copy first, then hash the copy: a blob is named after exactly the bytes it holds, even if
+                // the source is still being written to.
+                Path staging = root.resolve("cas").resolve("staging");
+                Files.createDirectories(staging);
+                Path tmp = staging.resolve(UUID.randomUUID() + ".tmp");
+                Files.copy(e.source(), tmp, StandardCopyOption.REPLACE_EXISTING);
+                String hash = Hashing.sha256(tmp);
+                long size = Files.size(tmp);
                 Path blob = blobPath(hash);
-                if (!Files.exists(blob)) {
+                if (Files.isRegularFile(blob) && Files.size(blob) == size) {
+                    Files.delete(tmp);
+                } else {
                     Files.createDirectories(blob.getParent());
-                    Path tmp = blob.resolveSibling(blob.getFileName() + "." + UUID.randomUUID() + ".tmp");
-                    Files.copy(source, tmp, StandardCopyOption.REPLACE_EXISTING);
                     moveAtomically(tmp, blob);
                 }
-                outputs.add(new CacheEntry.OutputFile(e.path(), hash, Files.size(source), e.mode()));
+                outputs.add(new CacheEntry.OutputFile(e.path(), hash, size, e.mode()));
             }
             CacheEntry entry = new CacheEntry(key, mojo, outputs, state, stamps, null);
             writeAtomically(entryPath(key), entry.encode());
@@ -122,11 +129,37 @@ public final class LocalCache {
                     throw new IllegalStateException("Cache entry escapes project directory: " + f.path());
                 }
                 Files.createDirectories(target.getParent());
-                Restamping.restamp(blobPath(f.hash()), target, f.mode(), entry.stamps(), current.values());
+                Path blob = blobPath(f.hash());
+                if (!intact(blob, f.hash())) {
+                    // Never restore bytes that are not what the entry names. Drop the entry so the next
+                    // build misses instead of failing again.
+                    Files.deleteIfExists(entryPath(entry.key()));
+                    Files.deleteIfExists(blob);
+                    throw new IllegalStateException("Cache blob " + f.hash() + " is damaged (entry " + entry.key() + " removed)");
+                }
+                Restamping.restamp(blob, target, f.mode(), entry.stamps(), current.values());
             }
         } catch (IOException e) {
             throw new UncheckedIOException("Cannot restore cache entry " + entry.key(), e);
         }
+    }
+
+    /** Blobs already checked in this JVM, by path, size and modification time. */
+    private static final Map<String, Boolean> VERIFIED = new java.util.concurrent.ConcurrentHashMap<>();
+
+    private static boolean intact(Path blob, String hash) throws IOException {
+        if (!Files.isRegularFile(blob)) {
+            return false;
+        }
+        String id = blob + "|" + Files.size(blob) + "|" + Files.getLastModifiedTime(blob).toMillis();
+        if (VERIFIED.containsKey(id)) {
+            return true;
+        }
+        if (!Hashing.sha256(blob).equals(hash)) {
+            return false;
+        }
+        VERIFIED.put(id, Boolean.TRUE);
+        return true;
     }
 
     public Path blobPath(String hash) {

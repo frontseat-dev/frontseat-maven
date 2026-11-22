@@ -50,4 +50,29 @@ class LocalCacheTest {
                         new CacheEntry.StateRecord("property", "q", null)));
         assertEquals(e, CacheEntry.decode(e.encode()));
     }
+
+    /** A blob that no longer holds the bytes it is named after is never restored. */
+    @Test
+    void damagedBlobsAreNotRestored(@TempDir Path tmp) throws Exception {
+        LocalCache cache = new LocalCache(tmp.resolve("cache"));
+        Path output = tmp.resolve("project/target/out.txt");
+        Files.createDirectories(output.getParent());
+        Files.writeString(output, "content");
+        CacheEntry entry = cache.store("k".repeat(64), "g:a:1:goal", Map.of("target/out.txt", output), List.of(), null);
+        Path blob = cache.blobPath(entry.files().get(0).hash());
+
+        // Same size, other bytes: only reading it shows the damage.
+        Files.writeString(blob, "CONTENT");
+        Path restoreTo = tmp.resolve("elsewhere");
+        Files.createDirectories(restoreTo);
+        CacheEntry found = cache.lookup("k".repeat(64)).orElseThrow();
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class, () -> cache.restoreFiles(found, restoreTo));
+        org.junit.jupiter.api.Assertions.assertFalse(Files.exists(restoreTo.resolve("target/out.txt")));
+        org.junit.jupiter.api.Assertions.assertTrue(cache.lookup("k".repeat(64)).isEmpty(), "the entry is gone: next time a miss");
+
+        // Truncated: already the lookup says no.
+        CacheEntry again = cache.store("m".repeat(64), "g:a:1:goal", Map.of("target/out.txt", output), List.of(), null);
+        Files.writeString(cache.blobPath(again.files().get(0).hash()), "con");
+        org.junit.jupiter.api.Assertions.assertTrue(cache.lookup("m".repeat(64)).isEmpty());
+    }
 }

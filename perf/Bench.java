@@ -28,6 +28,10 @@ public class Bench {
         int modules = 20;
         String mvnd = System.getenv("MOJOIO_MVND");
         String out = null;
+        if (args.length == 2 && args[0].equals("--generate")) { // used by adapters/nx/e2e
+            generate(Path.of(args[1]), modules, 40);
+            return;
+        }
         for (int i = 0; i < args.length; i++) {
             switch (args[i]) {
                 case "--reps" -> reps = Integer.parseInt(args[++i]);

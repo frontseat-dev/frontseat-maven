@@ -28,6 +28,19 @@ final class CacheKeyCalculator {
         CacheKey key = new CacheKey();
         key.add("mojo", mojoId(m));
         key.add("pluginDependencies", pluginDependencies(m.getPlugin()));
+        // A plugin or plugin dependency built in this reactor (a build-tools module): its coordinates
+        // say nothing about its content.
+        for (String id : UpstreamState.pluginReactorDependencies(m, ctx.session())) {
+            for (org.apache.maven.project.MavenProject p : ctx.session().getAllProjects()) {
+                if (!(p.getGroupId() + ":" + p.getArtifactId()).equals(id)) {
+                    continue;
+                }
+                java.io.File artifact = p.getArtifact() == null ? null : p.getArtifact().getFile();
+                Path content = artifact != null && artifact.exists() ? artifact.toPath()
+                        : Path.of(p.getBuild().getOutputDirectory());
+                key.add("pluginReactorDependency." + id, FileTrees.hashClasspathEntry(content, null));
+            }
+        }
         key.add("jdk", System.getProperty("java.vendor") + " " + System.getProperty("java.runtime.version"));
         key.add("stamping", descriptor.stampingCarry() ? "carry" : "exact");
         key.add("configuration", ConfigurationHasher.render(ctx, descriptor.ignoredParameters()));
@@ -48,7 +61,9 @@ final class CacheKeyCalculator {
             case CLASSPATH -> {
                 List<String> parts = new ArrayList<>();
                 for (Path p : input.paths()) {
-                    parts.add((Files.isDirectory(p) ? "dir:" : "file:") + FileTrees.hashClasspathEntry(p, filter));
+                    String h = FileTrees.hashClasspathEntry(p, filter);
+                    // An empty directory and a missing one are the same classpath entry: nothing.
+                    parts.add(h.equals(FileTrees.ABSENT) ? h : (Files.isDirectory(p) ? "dir:" : "file:") + h);
                 }
                 yield String.join(",", parts);
             }
@@ -117,7 +132,7 @@ final class CacheKeyCalculator {
         return m.getGroupId() + ":" + m.getArtifactId() + ":" + m.getVersion() + ":" + m.getGoal();
     }
 
-    private static String pluginDependencies(Plugin plugin) {
+    static String pluginDependencies(Plugin plugin) {
         if (plugin == null || plugin.getDependencies() == null) {
             return "";
         }

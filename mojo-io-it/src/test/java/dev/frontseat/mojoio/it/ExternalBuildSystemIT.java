@@ -76,4 +76,112 @@ class ExternalBuildSystemIT {
         assertEquals(List.of("com.example.samples:lib-core:test-compile", "com.example.samples:lib-core:test"),
                 missedByLibTest);
     }
+
+    /**
+     * Stage granularity (the default): one task per project and stage, so a build system starts Maven
+     * half as often. Downstream projects still depend only on the upstream compile stage.
+     */
+    @Test
+    void stagesJoinPhasesAndKeepPhaseLinks() throws Exception {
+        Path buildSystemCache = MavenBuild.cacheDir("external-stage-bs");
+        Path mojoioCache = MavenBuild.cacheDir("external-stage-unused");
+        MavenBuild a = MavenBuild.checkout("basic-multimodule", "external-stage", "a", mojoioCache);
+        List<ReferenceBuildSystem.Outcome> cold = new ReferenceBuildSystem(a, buildSystemCache, "stage").build("verify");
+        List<String> names = cold.stream().map(ReferenceBuildSystem.Outcome::task).collect(Collectors.toList());
+        for (String project : List.of("lib-core", "app")) {
+            assertEquals(List.of("compile", "test", "package"), names.stream()
+                    .filter(n -> n.startsWith("com.example.samples:" + project + ":"))
+                    .map(n -> n.substring(n.lastIndexOf(':') + 1)).filter(n -> !n.equals("verify"))
+                    .collect(Collectors.toList()), names.toString());
+        }
+
+        MavenBuild b = MavenBuild.checkout("basic-multimodule", "external-stage", "b", mojoioCache);
+        ReferenceBuildSystem bs = new ReferenceBuildSystem(b, buildSystemCache, "stage");
+        assertTrue(bs.build("verify").stream().allMatch(ReferenceBuildSystem.Outcome::hit));
+        assertTrue(Files.isRegularFile(b.dir().resolve("app/target/app-1.0.0-SNAPSHOT.jar")));
+
+        Path libTest = b.dir().resolve("lib-core/src/test/java/sample/core/GreeterTest.java");
+        Files.writeString(libTest, Files.readString(libTest).replace("class GreeterTest {", """
+                class GreeterTest {
+
+                    @Test
+                    void greetsTheWorld() {
+                        assertEquals("Hello, world!", new Greeter().greet("world"));
+                    }
+                """));
+        List<String> missed = bs.build("verify").stream().filter(o -> !o.hit())
+                .map(ReferenceBuildSystem.Outcome::task).filter(t -> !t.endsWith(":package") && !t.endsWith(":verify"))
+                .collect(Collectors.toList());
+        assertEquals(List.of("com.example.samples:lib-core:test"), missed);
+    }
+
+    /**
+     * Ordering that Maven 4's phase links alone do not give. b depends on c in test scope only and
+     * resolves the test classpath in its compile stage; b also depends on a's test-jar, which only
+     * exists once a is packaged; and c has a runtime dependency (d) that b's tests need although c's
+     * compile does not. The graph's dependsOn must say all three; the project must also build task
+     * by task.
+     */
+    @Test
+    void tasksWaitForWhatTheirMojosResolveAndForAttachedArtifacts() throws Exception {
+        Path buildSystemCache = MavenBuild.cacheDir("ordering-bs");
+        MavenBuild build = MavenBuild.checkout("task-ordering", "ordering", "checkout", MavenBuild.cacheDir("ordering-unused"));
+        build.run("verify", "-Dmojoio.graph.output=graph.json");
+        com.fasterxml.jackson.databind.JsonNode graph = new com.fasterxml.jackson.databind.ObjectMapper()
+                .readTree(build.dir().resolve("graph.json").toFile());
+        List<String> compileDependsOn = new java.util.ArrayList<>();
+        List<String> testDependsOn = new java.util.ArrayList<>();
+        for (com.fasterxml.jackson.databind.JsonNode p : graph.get("projects")) {
+            if (p.get("id").asText().equals("com.example.samples:b")) {
+                for (com.fasterxml.jackson.databind.JsonNode t : p.get("tasks")) {
+                    if (t.get("name").asText().equals("compile")) {
+                        t.get("dependsOn").forEach(d -> compileDependsOn.add(d.asText()));
+                    }
+                    if (t.get("name").asText().equals("test")) {
+                        t.get("dependsOn").forEach(d -> testDependsOn.add(d.asText()));
+                    }
+                }
+            }
+        }
+        assertTrue(compileDependsOn.contains("com.example.samples:c:compile"),
+                "a test-scope dependency a mojo of the stage resolves: " + compileDependsOn);
+        assertTrue(compileDependsOn.contains("com.example.samples:a:package"),
+                "a test-jar needs the upstream project packaged: " + compileDependsOn);
+
+        assertTrue(compileDependsOn.contains("com.example.samples:tools:package"),
+                "a plugin dependency built in this reactor has to be packaged: " + compileDependsOn);
+        assertTrue(testDependsOn.contains("com.example.samples:d:compile"),
+                "the runtime dependency of a dependency is there when tests run: " + testDependsOn);
+
+        List<ReferenceBuildSystem.Outcome> cold = new ReferenceBuildSystem(build, buildSystemCache, "stage").build("verify");
+        assertTrue(cold.stream().noneMatch(ReferenceBuildSystem.Outcome::hit), cold.toString());
+        assertTrue(Files.readString(build.dir().resolve("b/target/surefire-reports/TEST-sample.b.MainBTest.xml"))
+                .contains("tests=\"1\""));
+    }
+
+    /**
+     * A plugin dependency built in the same reactor (a build-tools module) is an input of the mojo by
+     * content, not just by coordinates. And resolving dependencies for a cache key must not narrow
+     * what Maven resolved for the build: a mojo without a declaration, after a declared one that needs
+     * less, still gets the whole test classpath.
+     */
+    @Test
+    void reactorPluginDependenciesAndDependencyResolutionStayAsInPlainMaven() throws Exception {
+        Path cache = MavenBuild.cacheDir("plugin-deps");
+        MavenBuild build = MavenBuild.checkout("task-ordering", "plugin-deps", "checkout", cache);
+        build.run("verify");
+        assertEquals("tool v1", Files.readString(build.dir().resolve("b/target/tool-copy.txt")).trim());
+        String afterCompile = Files.readString(build.dir().resolve("b/target/test-classpath-after-compile.txt"));
+        assertTrue(afterCompile.contains("junit-jupiter"), "test-scope dependencies after a compile-scope mojo: " + afterCompile);
+
+        MavenBuild.Result warm = build.run("clean", "verify");
+        assertEquals("HIT", warm.outcome("b", "antrun:run"), warm.log());
+        assertTrue(Files.readString(build.dir().resolve("b/target/test-classpath-after-compile.txt")).contains("junit-jupiter"),
+                "the same when the compile mojo was restored");
+
+        Files.writeString(build.dir().resolve("tools/src/main/resources/tool.txt"), "tool v2\n");
+        MavenBuild.Result changed = build.run("verify");
+        assertEquals("MISS", changed.outcome("b", "antrun:run"), changed.log());
+        assertEquals("tool v2", Files.readString(build.dir().resolve("b/target/tool-copy.txt")).trim());
+    }
 }

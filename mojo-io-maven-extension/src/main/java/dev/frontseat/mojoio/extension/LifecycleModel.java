@@ -70,6 +70,32 @@ final class LifecycleModel {
         return p;
     }
 
+    /**
+     * The stage a tree phase belongs to: {@code compile} (everything up to "ready"), {@code test} (unit
+     * tests), {@code package}, {@code verify} (integration tests and verification), {@code install},
+     * {@code deploy}. Null for phases outside the default lifecycle.
+     */
+    String stage(String treePhase) {
+        for (Phase p = phases.get(treePhase); p != null; p = p.parent() == null ? null : phases.get(p.parent())) {
+            switch (p.name()) {
+                case "package", "install", "deploy" -> {
+                    return p.name();
+                }
+                case "unit-test" -> {
+                    return "test";
+                }
+                case "integration-test", "verify" -> {
+                    return "verify";
+                }
+                case "build", "validate" -> {
+                    return "compile";
+                }
+                default -> { }
+            }
+        }
+        return null;
+    }
+
     List<Link> links(String treePhase) {
         Phase p = phases.get(treePhase);
         return p == null ? List.of() : p.links();
@@ -109,6 +135,22 @@ final class LifecycleModel {
             case "runtime" -> Set.of("compile", "runtime");
             case "test-only" -> Set.of("test");
             case "test" -> Set.of("compile", "provided", "system", "runtime", "test");
+            default -> Set.of("compile", "provided", "system", "runtime", "test");
+        };
+    }
+
+    /** The phases of the default lifecycle in the order a project goes through them. */
+    static final List<String> EXECUTION_ORDER = List.of("validate", "initialize", "sources", "resources", "compile",
+            "ready", "test-sources", "test-resources", "test-compile", "test", "package", "integration-test", "verify",
+            "install", "deploy");
+
+    /** Dependency scopes Maven resolves for a mojo's {@code requiresDependencyResolution}. */
+    static Set<String> resolutionScopes(String resolution) {
+        return switch (resolution) {
+            case "compile" -> Set.of("compile", "provided", "system");
+            case "runtime" -> Set.of("compile", "runtime");
+            case "compile+runtime" -> Set.of("compile", "provided", "system", "runtime");
+            case "runtime+system" -> Set.of("compile", "runtime", "system");
             default -> Set.of("compile", "provided", "system", "runtime", "test");
         };
     }

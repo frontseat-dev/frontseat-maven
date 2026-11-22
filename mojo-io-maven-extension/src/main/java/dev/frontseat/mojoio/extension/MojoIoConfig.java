@@ -15,6 +15,10 @@ import org.apache.maven.execution.MavenSession;
  *       changes in {@code target/mojo-io/state/} and replay them for executions that do not run.</li>
  *   <li>{@code mojoio.graph.output} (default unset): write the task graph to this file instead of
  *       running mojos (dry run).</li>
+ *   <li>{@code mojoio.graph.granularity} ({@code phase}, {@code stage} (default), {@code module}): how the
+ *       graph groups a project's executions into tasks. {@code phase}: one task per lifecycle phase (with its
+ *       hooks). {@code stage}: compile, test, package, verify. {@code module}: one task per project. Fewer,
+ *       bigger tasks mean fewer Maven invocations for a build system; smaller ones mean finer caching.</li>
  *   <li>{@code mojoio.cache.enabled} (default {@code true}): the built-in local cache.</li>
  *   <li>{@code mojoio.cache.dir} (default {@code ~/.m2/mojo-io-cache}),
  *       {@code mojoio.cache.read} / {@code mojoio.cache.write} (default {@code true}).</li>
@@ -33,9 +37,12 @@ import org.apache.maven.execution.MavenSession;
  */
 public record MojoIoConfig(boolean enabled, boolean state, Path graphOutput, boolean cache, Path cacheDir,
                            boolean read, boolean write, boolean prerequisites, Strict strict, boolean cleanOutputs,
-                           java.util.Set<String> only) {
+                           java.util.Set<String> only, Granularity granularity) {
 
     public enum Strict { OFF, WARN, FAIL }
+
+    /** How the task graph groups a project's executions into tasks. */
+    public enum Granularity { PHASE, STAGE, MODULE }
 
     /** Whether {@code project}'s mojos should run (see {@code mojoio.only}). */
     public boolean runs(org.apache.maven.project.MavenProject project) {
@@ -63,7 +70,8 @@ public record MojoIoConfig(boolean enabled, boolean state, Path graphOutput, boo
                 Strict.valueOf(get(user, system, "mojoio.strict", "warn").toUpperCase(java.util.Locale.ROOT)),
                 bool(user, system, "mojoio.strict.cleanOutputs", false),
                 java.util.Set.of(get(user, system, "mojoio.only", "").split("\\s*,\\s*")).stream()
-                        .filter(x -> !x.isBlank()).collect(java.util.stream.Collectors.toUnmodifiableSet()));
+                        .filter(x -> !x.isBlank()).collect(java.util.stream.Collectors.toUnmodifiableSet()),
+                Granularity.valueOf(get(user, system, "mojoio.graph.granularity", "stage").toUpperCase(java.util.Locale.ROOT)));
     }
 
     private static String get(Properties user, Properties system, String name, String def) {

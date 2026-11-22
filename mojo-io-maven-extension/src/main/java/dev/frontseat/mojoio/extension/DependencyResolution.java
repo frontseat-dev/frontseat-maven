@@ -47,6 +47,77 @@ public class DependencyResolution {
     }
 
     /**
+     * The project's test classpath, resolved here and now, leaving the project as it was.
+     *
+     * <p>{@code MavenProject#getTestClasspathElements()} alone is not an input: it reflects the
+     * dependencies resolved for whichever mojo ran last (none, for a mojo that asks for no resolution
+     * after others that ran; the test scope, after others that were restored). The project's resolved
+     * artifacts and filter are put back afterwards, so the mojo that runs next sees what it would have
+     * seen without this call.
+     */
+    public List<java.nio.file.Path> testClasspath(MavenProject project, MavenSession session)
+            throws LifecycleExecutionException {
+        Collection<String> test = toScopes(Artifact.SCOPE_TEST);
+        Saved saved = save(project);
+        try {
+            resolver.resolveProjectDependencies(project, test, test, session, false, Collections.<Artifact>emptySet());
+            project.setArtifactFilter(new CumulativeScopeArtifactFilter(test));
+            List<java.nio.file.Path> paths = new java.util.ArrayList<>();
+            for (String element : project.getTestClasspathElements()) {
+                paths.add(java.nio.file.Path.of(element));
+            }
+            return paths;
+        } catch (org.apache.maven.artifact.DependencyResolutionRequiredException e) {
+            throw new LifecycleExecutionException("cannot compute the test classpath: " + e.getMessage(), e);
+        } finally {
+            saved.restore();
+        }
+    }
+
+    /**
+     * The project's dependency state (resolved artifacts, filter and the views derived from them), to
+     * put back after resolving for a cache key. Maven resolves a project's dependencies once, for all
+     * the scopes its build plan needs, and afterwards only switches the filter per mojo. A narrower
+     * resolution left in place here would be what every later mojo gets, declared or not.
+     */
+    public static final class Saved {
+        private static final List<String> FIELDS = List.of("resolvedArtifacts", "artifactFilter", "artifacts", "artifactMap");
+        private final MavenProject project;
+        private final java.util.Map<java.lang.reflect.Field, Object> values = new java.util.LinkedHashMap<>();
+        private boolean complete = true;
+
+        private Saved(MavenProject project) {
+            this.project = project;
+            for (String name : FIELDS) {
+                try {
+                    java.lang.reflect.Field f = MavenProject.class.getDeclaredField(name);
+                    f.setAccessible(true);
+                    values.put(f, f.get(project));
+                } catch (ReflectiveOperationException | RuntimeException e) {
+                    complete = false; // another MavenProject layout: leave the project as resolution leaves it
+                }
+            }
+        }
+
+        public void restore() {
+            if (!complete) {
+                return;
+            }
+            for (java.util.Map.Entry<java.lang.reflect.Field, Object> e : values.entrySet()) {
+                try {
+                    e.getKey().set(project, e.getValue());
+                } catch (ReflectiveOperationException | RuntimeException ignored) {
+                    // nothing better to do
+                }
+            }
+        }
+    }
+
+    public static Saved save(MavenProject project) {
+        return new Saved(project);
+    }
+
+    /**
      * The project's external (non-reactor) dependencies with their scopes, collected without
      * downloading or resolving any file, as {@code groupId:artifactId:type[:classifier]:version:scope}.
      * Used by the task graph so a build system can hash the classpath without resolving it.

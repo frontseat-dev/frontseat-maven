@@ -53,12 +53,12 @@ final class StateFiles {
     }
 
     static void record(MavenProject project, MojoExecution m, List<CacheEntry.StateRecord> records,
-                       String incompleteReason) {
+                       String incompleteReason, String phase) {
         List<StateChange> changes = new ArrayList<>();
         for (CacheEntry.StateRecord r : records) {
             changes.add(new StateChange(r.kind(), r.name(), r.value()));
         }
-        new StateFile(executionId(m), changes, incompleteReason).write(file(project, m));
+        new StateFile(executionId(m), phase, changes, incompleteReason).write(file(project, m));
     }
 
     /**
@@ -74,6 +74,13 @@ final class StateFiles {
     static java.util.Map<String, List<CacheEntry.StateRecord>> replayPending(MavenProject project,
             Collection<MojoExecution> plan, PathNormalizer normalizer,
             org.apache.maven.project.MavenProjectHelper helper) {
+        return replayPending(project, plan, normalizer, helper, state -> true);
+    }
+
+    /** As above, for the recorded executions {@code accept} lets through. */
+    static java.util.Map<String, List<CacheEntry.StateRecord>> replayPending(MavenProject project,
+            Collection<MojoExecution> plan, PathNormalizer normalizer,
+            org.apache.maven.project.MavenProjectHelper helper, java.util.function.Predicate<StateFile> accept) {
         java.util.Map<String, List<CacheEntry.StateRecord>> applied = new java.util.HashMap<>();
         Path dir = directory(project);
         if (!Files.isDirectory(dir)) {
@@ -97,7 +104,7 @@ final class StateFiles {
                 LOG.warn("[mojo-io] ignoring unreadable state file {}: {}", f, e.getMessage());
                 continue;
             }
-            if (planned.contains(identity(state.execution()))) {
+            if (planned.contains(identity(state.execution())) || !accept.test(state)) {
                 continue;
             }
             if (!state.complete()) {

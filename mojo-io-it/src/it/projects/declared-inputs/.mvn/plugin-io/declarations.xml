@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<plugin-io xmlns="urn:mojo-io:plugin-io:1.0">
+  <plugin groupId="org.apache.maven.plugins" artifactId="maven-enforcer-plugin">
+    <mojo goal="enforce">
+      <inputs>
+        <projectModel/>
+        <mavenVersion/>
+      </inputs>
+    </mojo>
+  </plugin>
+  <plugin groupId="org.apache.maven.plugins" artifactId="maven-antrun-plugin">
+    <mojo goal="run">
+      <inputs>
+        <projectFiles/>
+      </inputs>
+      <outputs>
+        <observed/>
+      </outputs>
+    </mojo>
+  </plugin>
+  <!-- Overrides the built-in declaration: the classpath is an input even for a mojo that does not ask
+       Maven to resolve dependencies. -->
+  <plugin groupId="org.codehaus.mojo" artifactId="build-helper-maven-plugin">
+    <mojo goal="regex-property">
+      <inputs>
+        <testClasspath ownOutputs="false"/>
+      </inputs>
+    </mojo>
+  </plugin>
+</plugin-io>

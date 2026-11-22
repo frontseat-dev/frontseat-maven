@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>com.example.samples</groupId>
+    <artifactId>task-ordering</artifactId>
+    <version>1.0.0-SNAPSHOT</version>
+  </parent>
+  <artifactId>b</artifactId>
+  <dependencies>
+    <dependency>
+      <groupId>com.example.samples</groupId>
+      <artifactId>a</artifactId>
+      <version>${project.version}</version>
+      <type>test-jar</type>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>com.example.samples</groupId>
+      <artifactId>c</artifactId>
+      <version>${project.version}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <!-- Bound to validate, resolves the test classpath: before anything of b is compiled. -->
+        <artifactId>maven-dependency-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>test-classpath</id>
+            <phase>validate</phase>
+            <goals>
+              <goal>build-classpath</goal>
+            </goals>
+            <configuration>
+              <outputFile>${project.build.directory}/test-classpath.txt</outputFile>
+            </configuration>
+          </execution>
+          <execution>
+            <!-- After the (declared) compile mojo, which only needs the compile scope: this one must
+                 still get the whole test classpath. -->
+            <id>test-classpath-after-compile</id>
+            <phase>process-classes</phase>
+            <goals>
+              <goal>build-classpath</goal>
+            </goals>
+            <configuration>
+              <outputFile>${project.build.directory}/test-classpath-after-compile.txt</outputFile>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
+        <!-- Reads a resource from a plugin dependency that is built in this reactor. -->
+        <artifactId>maven-antrun-plugin</artifactId>
+        <dependencies>
+          <dependency>
+            <groupId>com.example.samples</groupId>
+            <artifactId>tools</artifactId>
+            <version>${project.version}</version>
+          </dependency>
+        </dependencies>
+        <executions>
+          <execution>
+            <id>copy-tool</id>
+            <phase>validate</phase>
+            <goals>
+              <goal>run</goal>
+            </goals>
+            <configuration>
+              <target>
+                <loadresource property="tool">
+                  <javaresource name="tool.txt" classpathref="maven.plugin.classpath"/>
+                </loadresource>
+                <echo file="${project.build.directory}/tool-copy.txt" message="${tool}"/>
+              </target>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>

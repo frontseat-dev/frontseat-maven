@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<plugin-io xmlns="urn:mojo-io:plugin-io:1.0">
+  <!-- This project's one antrun script reads nothing but its plugin classpath. -->
+  <plugin groupId="org.apache.maven.plugins" artifactId="maven-antrun-plugin">
+    <mojo goal="run">
+      <outputs>
+        <observed/>
+      </outputs>
+    </mojo>
+  </plugin>
+</plugin-io>

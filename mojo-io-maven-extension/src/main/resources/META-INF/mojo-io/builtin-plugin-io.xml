@@ -18,6 +18,17 @@
       </outputs>
       <ignoredParameters>resources</ignoredParameters>
     </mojo>
+    <mojo goal="copy-resources" stamping="carry">
+      <inputs>
+        <resources parameter="resources"/>
+        <files parameter="filters"/>
+        <files parameter="buildFilters"/>
+      </inputs>
+      <outputs>
+        <copiedResources resourcesParameter="resources" outputDirectoryParameter="outputDirectory"/>
+      </outputs>
+      <ignoredParameters>resources</ignoredParameters>
+    </mojo>
     <mojo goal="testResources" stamping="carry">
       <inputs>
         <resources parameter="resources"/>
@@ -29,6 +40,13 @@
       </outputs>
       <ignoredParameters>resources</ignoredParameters>
     </mojo>
+  </plugin>
+
+  <plugin groupId="org.codehaus.mojo" artifactId="build-helper-maven-plugin">
+    <!-- Only compute project properties from their configuration; the properties are recorded as state. -->
+    <mojo goal="parse-version"/>
+    <mojo goal="regex-property"/>
+    <mojo goal="regex-properties"/>
   </plugin>
 
   <plugin groupId="org.apache.maven.plugins" artifactId="maven-compiler-plugin">
@@ -101,6 +119,18 @@
       <inputs>
         <files expression="${project.compileSourceRoots}"/>
         <resources expression="${project.resources}"/>
+        <files expression="${project.file}"/>
+      </inputs>
+      <outputs>
+        <file parameter="outputDirectory" name="{finalName}{-classifier}.jar"/>
+      </outputs>
+      <ignoredParameters>forceCreation, defaultManifestFile</ignoredParameters>
+      <ignoredWrites>maven-archiver/**</ignoredWrites>
+    </mojo>
+    <mojo goal="test-jar-no-fork" prerequisitePhase="prepare-package" stamping="carry">
+      <inputs>
+        <files expression="${project.testCompileSourceRoots}"/>
+        <resources expression="${project.testResources}"/>
         <files expression="${project.file}"/>
       </inputs>
       <outputs>
@@ -183,6 +213,14 @@
         <!-- prepare-agent prepends to the existing property, so its current value is an input. -->
         <projectProperty nameParameter="propertyName" defaultName="argLine"/>
       </inputs>
+    </mojo>
+    <!-- Fails the build when the coverage rules (configuration) are not met; writes nothing. -->
+    <mojo goal="check">
+      <inputs>
+        <files parameter="dataFile"/>
+        <files expression="${project.build.outputDirectory}"/>
+      </inputs>
+      <ignoredParameters>dataFile</ignoredParameters>
     </mojo>
     <mojo goal="report">
       <inputs>

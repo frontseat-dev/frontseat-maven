@@ -51,9 +51,19 @@ final class ReferenceBuildSystem {
     private final Path root;
     private final Path cache;
     private final boolean respectRunTogether;
+    private final String granularity;
 
     ReferenceBuildSystem(MavenBuild maven, Path cache) {
         this(maven, cache, true);
+    }
+
+    /** {@code granularity}: the graph's task size, {@code phase}, {@code stage} or {@code module}. */
+    ReferenceBuildSystem(MavenBuild maven, Path cache, String granularity) {
+        this.maven = maven;
+        this.root = maven.dir();
+        this.cache = cache;
+        this.respectRunTogether = true;
+        this.granularity = granularity;
     }
 
     /** {@code respectRunTogether=false} splits hook brackets into separate tasks (a control: it breaks). */
@@ -62,10 +72,11 @@ final class ReferenceBuildSystem {
         this.root = maven.dir();
         this.cache = cache;
         this.respectRunTogether = respectRunTogether;
+        this.granularity = "phase";
     }
 
     List<Outcome> build(String goal) throws IOException {
-        maven.run(goal, "-Dmojoio.graph.output=graph.json");
+        maven.run(goal, "-Dmojoio.graph.output=graph.json", "-Dmojoio.graph.granularity=" + granularity);
         JsonNode graph = new ObjectMapper().readTree(root.resolve("graph.json").toFile());
 
         Map<String, String> taskHashes = new LinkedHashMap<>();
@@ -136,19 +147,29 @@ final class ReferenceBuildSystem {
             sb.append("|pom=").append(contentHash(resolve(pom.asText(), dir), List.of(), List.of()));
         }
         sb.append("|ext=").append(project.get("externalDependencies"));
+        // What earlier members of the task produce is not an input of the task: it does not exist yet
+        // when the task is hashed on a fresh checkout.
+        List<Path> producedInTask = new ArrayList<>();
         for (JsonNode e : task.executions()) {
             sb.append("|exec=").append(e.get("invocation").asText()).append(' ').append(e.get("fingerprint"));
             for (JsonNode in : e.get("inputs")) {
                 switch (in.get("kind").asText()) {
                     case "files" -> {
                         for (JsonNode p : in.get("paths")) {
-                            sb.append("|f=").append(contentHash(resolve(p.asText(), dir), texts(in.get("includes")),
+                            Path path = resolve(p.asText(), dir);
+                            if (producedInTask.stream().anyMatch(path::startsWith)) {
+                                continue;
+                            }
+                            sb.append("|f=").append(contentHash(path, texts(in.get("includes")),
                                     texts(in.get("excludes"))));
                         }
                     }
                     case "classpath" -> { } // covered by the task's dependsOn (upstream task hashes)
                     default -> sb.append("|v=").append(in.get("value"));
                 }
+            }
+            for (JsonNode out : e.get("outputs")) {
+                producedInTask.add(resolve(out.get("path").asText(), dir));
             }
         }
         return sha256(sb.toString().getBytes(StandardCharsets.UTF_8));
