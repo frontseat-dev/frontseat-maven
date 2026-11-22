@@ -131,14 +131,15 @@ final class ConfigurationHasher {
             }
             return sorted.toString();
         }
-        String coordinate = coordinate(ctx, value);
-        if (coordinate != null) {
-            return coordinate;
-        }
         if (isMavenObject(value.getClass())) {
             // The running build itself (session, project, repositories), injected under any parameter
             // name: not configuration. What the mojo reads through it is what its declaration covers.
+            // (Checked first: a project also has a group, an artifact and a version.)
             return "(maven)";
+        }
+        String coordinate = coordinate(ctx, value);
+        if (coordinate != null) {
+            return coordinate;
         }
         throw new NotCacheableException("has unsupported type " + value.getClass().getName());
     }
