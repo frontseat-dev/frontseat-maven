@@ -204,11 +204,19 @@ Every cacheable execution writes its key's inputs, and which declaration was use
 
 ## Published versions
 
-Releases go to **GitHub Packages** (`.github/workflows/release.yml`):
+Releases go to **GitHub Packages** (`.github/workflows/release.yml`), versioned from
+[Conventional Commits](https://www.conventionalcommits.org):
 
-- **A release:** push a tag `v1.2.3`, or run the *Release* workflow manually with a version.
-- **A snapshot:** run the workflow without a version, or push a commit whose message contains
-  `[publish-snapshot]`.
+- **A release:** run the *Release* workflow (Actions > Release > Run workflow). With no version given,
+  the version comes from the commits since the last `v*` tag: `feat:` makes a minor release, `!` or
+  `BREAKING CHANGE:` a major one, anything else a patch release. The maven-release-plugin computes it
+  with the [conventional-commits version policy](https://github.com/nielsbasjes/conventional-commits-maven-release).
+  The run publishes the artifacts and tags the commit `v<version>`. A version given by hand overrides
+  the computed one.
+- **A snapshot:** push a commit whose message contains `[publish-snapshot]`.
+- **Commit messages:** PRs are rebase-merged, so every commit lands on `main`. CI checks that each one
+  is a Conventional Commit: `<type>(<scope>)!: <summary>`, with type `feat`, `fix`, `docs`, `style`,
+  `refactor`, `perf`, `test`, `build`, `ci`, `chore` or `revert`.
 
 Published: `mojo-io-parent`, `mojo-io-spec`, `mojo-io-cache`, `mojo-io-maven-extension` and the REAPI
 adapter `mojo-io-reapi`, all in group `dev.frontseat.mojoio`.
