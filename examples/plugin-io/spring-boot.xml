@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Declarations for Spring Boot builds. Copy into a project's .mvn/plugin-io/. Verified on Spring
+  PetClinic (docs/real-projects.md) with spring-boot-maven-plugin 4.1.0 and spring-javaformat 0.0.47.
+
+  Read the note on each mojo. Not declared here: git-commit-id:revision, which reads the git
+  repository (commits, branches, the dirty state); it simply runs.
+-->
+<plugin-io xmlns="urn:mojo-io:plugin-io:1.0">
+
+  <plugin groupId="org.springframework.boot" artifactId="spring-boot-maven-plugin">
+    <!-- Writes META-INF/build-info.properties from the project model. Its build.time comes from the
+         time parameter, by default project.build.outputTimestamp: set that (as reproducible builds
+         do), or the time is the clock's and a restored file carries the time of the build that made
+         it. -->
+    <mojo goal="build-info">
+      <inputs>
+        <projectModel/>
+      </inputs>
+      <outputs>
+        <observed/>
+      </outputs>
+    </mojo>
+    <!-- Rewrites the project's jar into an executable one: the jar as jar:jar left it, the runtime
+         classpath and the configuration are the inputs; the rewritten jar (and the .original copy)
+         the outputs. Configurations with layers or a custom layout factory run uncached. -->
+    <mojo goal="repackage">
+      <inputs>
+        <files expression="${project.artifact.file}"/>
+        <testClasspath ownOutputs="false"/>
+      </inputs>
+      <outputs>
+        <observed/>
+      </outputs>
+    </mojo>
+  </plugin>
+
+  <plugin groupId="io.spring.javaformat" artifactId="spring-javaformat-maven-plugin">
+    <!-- Checks the formatting of the project's sources; fails the build otherwise. The source
+         directories are empty by default: the mojo then reads the project's source roots. -->
+    <mojo goal="validate">
+      <inputs>
+        <files parameter="sourceDirectories"/>
+        <files parameter="testSourceDirectories"/>
+        <files expression="${project.compileSourceRoots}"/>
+        <files expression="${project.testCompileSourceRoots}"/>
+        <files expression="${project.basedir}/.springjavaformatconfig"/>
+        <files expression="${maven.multiModuleProjectDirectory}/.springjavaformatconfig"/>
+      </inputs>
+      <ignoredParameters>sourceDirectories, testSourceDirectories</ignoredParameters>
+    </mojo>
+  </plugin>
+</plugin-io>

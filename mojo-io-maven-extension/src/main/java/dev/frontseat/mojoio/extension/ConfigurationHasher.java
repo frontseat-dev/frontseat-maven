@@ -3,6 +3,7 @@ package dev.frontseat.mojoio.extension;
 import java.io.File;
 import java.nio.file.Path;
 import java.util.Collection;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -44,6 +45,11 @@ final class ConfigurationHasher {
             if (!"default-value".equals(attr)) {
                 sb.append('@').append(attr).append('=').append(node.getAttribute(attr)).append(' ');
             }
+        }
+        if (node.getChild("groupId") != null && node.getChild("artifactId") != null) {
+            // An artifact written out in the configuration (an annotation processor path, a dependency
+            // of a mojo): its content is fixed only by a release version.
+            return sb.append(coordinateNode(ctx, node)).toString();
         }
         if (node.getChildCount() > 0) {
             sb.append('{');
@@ -125,12 +131,114 @@ final class ConfigurationHasher {
             }
             return sorted.toString();
         }
+        String coordinate = coordinate(ctx, value);
+        if (coordinate != null) {
+            return coordinate;
+        }
         if (isMavenObject(value.getClass())) {
             // The running build itself (session, project, repositories), injected under any parameter
             // name: not configuration. What the mojo reads through it is what its declaration covers.
             return "(maven)";
         }
         throw new NotCacheableException("has unsupported type " + value.getClass().getName());
+    }
+
+    /**
+     * An artifact named by coordinates, such as an entry of the compiler's {@code annotationProcessorPaths}
+     * (any object with {@code getGroupId()}, {@code getArtifactId()} and {@code getVersion()}). A release
+     * version names fixed content; a missing version is looked up in the project's dependency
+     * management, as the compiler does with {@code annotationProcessorPathsUseDepMgmt}. A SNAPSHOT or a
+     * version range can change content under the same name: not cacheable.
+     */
+    private static String coordinate(ExecutionContext ctx, Object value) throws NotCacheableException {
+        String groupId = getter(value, "getGroupId");
+        String artifactId = getter(value, "getArtifactId");
+        if (groupId == null || artifactId == null || !hasMethod(value, "getVersion")) {
+            return null;
+        }
+        String version = getter(value, "getVersion");
+        String type = getter(value, "getType");
+        String classifier = getter(value, "getClassifier");
+        if (version == null || version.isBlank()) {
+            version = managedVersion(ctx, groupId, artifactId);
+        }
+        if (version == null || version.isBlank()) {
+            throw new NotCacheableException("artifact " + groupId + ":" + artifactId + " has no version");
+        }
+        if (version.endsWith("-SNAPSHOT") || version.startsWith("[") || version.startsWith("(")) {
+            throw new NotCacheableException("artifact " + groupId + ":" + artifactId + ":" + version
+                    + " can change under the same version");
+        }
+        StringBuilder sb = new StringBuilder(groupId).append(':').append(artifactId).append(':')
+                .append(type == null ? "jar" : type).append(':').append(classifier == null ? "" : classifier)
+                .append(':').append(version);
+        Object exclusions = invoke(value, "getExclusions");
+        if (exclusions instanceof Collection<?> c && !c.isEmpty()) {
+            List<String> excluded = new ArrayList<>();
+            for (Object e : c) {
+                excluded.add(getter(e, "getGroupId") + ":" + getter(e, "getArtifactId"));
+            }
+            java.util.Collections.sort(excluded);
+            sb.append(" excluding ").append(excluded);
+        }
+        return sb.toString();
+    }
+
+    private static String coordinateNode(ExecutionContext ctx, Xpp3Dom node) throws NotCacheableException {
+        java.util.TreeMap<String, String> fields = new java.util.TreeMap<>();
+        for (Xpp3Dom child : node.getChildren()) {
+            fields.put(child.getName(), child.getChildCount() > 0 ? renderNode(ctx, child)
+                    : String.valueOf(ctx.evaluateLeaf(child)));
+        }
+        String groupId = fields.get("groupId");
+        String artifactId = fields.get("artifactId");
+        String version = fields.get("version");
+        if (version == null || version.isBlank() || "null".equals(version)) {
+            version = managedVersion(ctx, groupId, artifactId);
+            if (version == null) {
+                throw new NotCacheableException("artifact " + groupId + ":" + artifactId + " has no version");
+            }
+            fields.put("version", version + " (managed)");
+        }
+        if (version.endsWith("-SNAPSHOT") || version.startsWith("[") || version.startsWith("(")) {
+            throw new NotCacheableException("artifact " + groupId + ":" + artifactId + ":" + version
+                    + " can change under the same version");
+        }
+        return fields.toString();
+    }
+
+    private static String managedVersion(ExecutionContext ctx, String groupId, String artifactId) {
+        if (ctx.project().getDependencyManagement() == null) {
+            return null;
+        }
+        for (org.apache.maven.model.Dependency d : ctx.project().getDependencyManagement().getDependencies()) {
+            if (groupId.equals(d.getGroupId()) && artifactId.equals(d.getArtifactId())) {
+                return d.getVersion();
+            }
+        }
+        return null;
+    }
+
+    private static boolean hasMethod(Object o, String name) {
+        try {
+            o.getClass().getMethod(name);
+            return true;
+        } catch (NoSuchMethodException e) {
+            return false;
+        }
+    }
+
+    private static Object invoke(Object o, String name) {
+        try {
+            return o.getClass().getMethod(name).invoke(o);
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            return null;
+        }
+    }
+
+    private static String getter(Object o, String name) {
+        Object v = invoke(o, name);
+        return v instanceof String s ? s : null;
     }
 
     private static final List<String> MAVEN_OBJECTS = List.of(

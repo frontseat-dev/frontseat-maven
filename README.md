@@ -84,7 +84,7 @@ storing an entry, the mojo just runs.
 | Plugin | Goal | Status | IT-verified version | Parameters checked in | Restores | Notes |
 |---|---|---|---|---|---|---|
 | `maven-resources-plugin` | `resources`, `testResources` | ✅ | 3.3.1 | 3.1.0, 3.2.0, 3.3.0, 3.3.1, 4.0.0-beta-1 | copied files | `carry`. Filtering hashes exactly the `${…}`/`@…@` expressions the files reference. `${maven.build.timestamp}` in a filtered file means it misses every time. |
-| `maven-compiler-plugin` | `compile`, `testCompile` | ✅ | 3.13.0 | 3.8.1 – 3.14.0 | classes, generated sources, source root, artifact file | `carry`. **4.x is not compatible** (no `compilePath`/`testPath`) and runs uncached. Configuring `annotationProcessorPaths` makes it uncacheable. Toolchains are not in the key. |
+| `maven-compiler-plugin` | `compile`, `testCompile` | ✅ | 3.13.0 | 3.8.1 – 3.14.0 | classes, generated sources, source root, artifact file | `carry`. **4.x is not compatible** (no `compilePath`/`testPath`) and runs uncached. Annotation processors in `annotationProcessorPaths` count by coordinates (a version from dependency management included); a SNAPSHOT or range processor version runs uncached. Toolchains are not in the key. |
 | `maven-surefire-plugin` | `test` | ✅ | 3.5.2 | 2.22.2, 3.0.0, 3.2.5, 3.5.2, 3.5.4 | reports, JaCoCo `destfile` | `exact`. Tests that use the network, a DB, env vars or files outside the project get cached too: override with `.mvn/plugin-io/`. With `testFailureIgnore`, failures are cached. |
 | `maven-failsafe-plugin` | `integration-test`, `verify` | ✅ | 3.5.2 | 2.22.2, 3.0.0, 3.2.5, 3.5.2, 3.5.4 | reports, summary | `exact`. Integration tests often reach outside the project; mark them `cacheable="false"` in `.mvn/plugin-io/` if yours do. |
 | `maven-jar-plugin` | `jar`, `test-jar` | ✅ | 3.4.2 | 3.2.2, 3.3.0, 3.4.1, 3.4.2 | the jar, artifact file / attached artifact | `carry`: after a version bump the restored jar is renamed and its `pom.properties`, pom and manifest are restamped. |
@@ -110,6 +110,8 @@ storing an entry, the mojo just runs.
 | `spdx-maven-plugin` | `createSPDX` | 📄 | | | the SPDX document | Same file. |
 | `moditect-maven-plugin` | `add-module-info` | 📄 | | | the rewritten jar | Same file. |
 | `tycho-compiler-plugin` | `compile`, `testCompile` | 📄 | | 5.0.1 | classes | Copy [`examples/plugin-io/tycho.xml`](examples/plugin-io/tycho.xml). p2 bundles count by their qualified versions. Use a fixed or git-based build qualifier. |
+| `spring-boot-maven-plugin` | `build-info`, `repackage` | 📄 | | 4.1.0 | `build-info.properties`, the executable jar | Copy [`examples/plugin-io/spring-boot.xml`](examples/plugin-io/spring-boot.xml). Set `project.build.outputTimestamp` for `build-info`. |
+| `spring-javaformat-maven-plugin` | `validate` | 📄 | | 0.0.47 | nothing | Same file. |
 | `maven-antrun-plugin` | `run` | 📄 | | | whatever it writes | An Ant script can do anything: declare it per project, for one known script ([example](examples/plugin-io/apache-commons-parent.xml)). |
 | `maven-javadoc-plugin` | `javadoc`, `jar` | ➖ | | | | |
 | `maven-clean-plugin` | `clean` | ⛔ | | | | Deletes outputs; nothing to cache. |
