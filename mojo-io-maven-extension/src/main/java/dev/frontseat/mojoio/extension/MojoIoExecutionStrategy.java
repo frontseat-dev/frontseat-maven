@@ -125,6 +125,18 @@ public class MojoIoExecutionStrategy implements MojosExecutionStrategy {
         }));
     }
 
+    /**
+     * {@code mojoio.only.inputCheck}: per build and selected project, a copy taken before any state was
+     * replayed or any mojo ran: the project as the task graph's dry run saw it (see DryInputCheck).
+     */
+    private final Map<MavenSession, Map<String, MavenProject>> dryProjects =
+            Collections.synchronizedMap(new WeakHashMap<>());
+
+    private MavenProject dryProject(MavenSession session, MavenProject project) {
+        Map<String, MavenProject> projects = dryProjects.get(session);
+        return projects == null ? null : projects.get(project.getGroupId() + ":" + project.getArtifactId());
+    }
+
     /** Per build: the projects this strategy was called for. */
     private final Map<MavenSession, Set<String>> started = Collections.synchronizedMap(new WeakHashMap<>());
 
@@ -214,6 +226,11 @@ public class MojoIoExecutionStrategy implements MojosExecutionStrategy {
                     plan.size());
             return;
         }
+        if (!config.only().isEmpty() && config.inputCheck() != MojoIoConfig.Strict.OFF) {
+            // The first call for this project (Maven 4 calls once per step): nothing has changed it yet.
+            dryProjects.computeIfAbsent(session, s -> new java.util.concurrent.ConcurrentHashMap<>())
+                    .computeIfAbsent(project.getGroupId() + ":" + project.getArtifactId(), k -> project.clone());
+        }
         if (config.state()) {
             if (!config.only().isEmpty()) {
                 replayUpstream(session, project, plan, config);
@@ -250,6 +267,10 @@ public class MojoIoExecutionStrategy implements MojosExecutionStrategy {
                         throw new NotCacheableException("cannot resolve the test classpath: " + e.getMessage(), e);
                     }
                 });
+        boolean declared = descriptor.isPresent() && structuralReason(m, descriptor.get()) == null;
+        if (declared) {
+            checkDryInputs(m, session, project, descriptor.get(), normalizer, config, label);
+        }
 
         CacheKey key = null;
         if (cache != null) {
@@ -268,7 +289,6 @@ public class MojoIoExecutionStrategy implements MojosExecutionStrategy {
             }
         }
 
-        boolean declared = descriptor.isPresent() && structuralReason(m, descriptor.get()) == null;
         boolean strict = config.strict() != MojoIoConfig.Strict.OFF && declared;
         boolean observing = declared && resolvedOutputs(ctx, descriptor.get()).stream().anyMatch(ResolvedOutput::observed);
         WriteSnapshot snapshot = null;
@@ -322,6 +342,39 @@ public class MojoIoExecutionStrategy implements MojosExecutionStrategy {
             store(m, ctx, normalizer.stamps(), cache, config, descriptor.get(), key, state,
                     incomplete != null ? incomplete : undeclared, label, observed);
         }
+    }
+
+    /**
+     * {@code mojoio.only.inputCheck}: the execution's file inputs now (after replay and earlier mojos)
+     * against the task graph's view of them. Paths the graph missed fail the task (or warn): a build
+     * system did not hash them, and a sandbox did not get them.
+     */
+    private void checkDryInputs(MojoExecution m, MavenSession session, MavenProject project,
+                                MojoCacheDescriptor descriptor, PathNormalizer normalizer, MojoIoConfig config,
+                                String label) throws LifecycleExecutionException {
+        MavenProject dry = dryProject(session, project);
+        if (dry == null) {
+            return;
+        }
+        List<DryInputCheck.Finding> findings;
+        try {
+            findings = DryInputCheck.uncovered(
+                    DryInputCheck.fileInputs(new ExecutionContext(session, project, m, normalizer, true), descriptor),
+                    DryInputCheck.fileInputs(new ExecutionContext(session, dry, m, normalizer, true), descriptor),
+                    DryInputCheck.exemptRoots(session, dry));
+        } catch (NotCacheableException | RuntimeException e) {
+            LOG.debug(PREFIX + "cannot compare the inputs of {} with the task graph's", label, e);
+            return;
+        }
+        if (findings.isEmpty()) {
+            return;
+        }
+        String message = DryInputCheck.message(label, descriptor.source(), findings, project.getBasedir().toPath());
+        if (config.inputCheck() == MojoIoConfig.Strict.FAIL) {
+            throw new LifecycleExecutionException(PREFIX + "INPUTS " + message
+                    + " To run anyway: -Dmojoio.only.inputCheck=warn.", m, project);
+        }
+        LOG.warn(PREFIX + "INPUTS {}", message);
     }
 
     private static List<ResolvedOutput> resolvedOutputs(ExecutionContext ctx, MojoCacheDescriptor descriptor) {

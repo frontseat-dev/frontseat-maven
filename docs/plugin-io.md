@@ -90,8 +90,15 @@ declarations are read for this, not declarations inside plugin jars.
 
 ### Checking a declaration
 
-[Strict mode](design.md#strict-mode) reports outputs a declaration misses. Nothing can report a missing
-**input**, and a missing input means stale hits. So for every new declaration:
+[Strict mode](design.md#strict-mode) reports outputs a declaration misses. A missing **input** is
+harder to catch, and it means stale hits. One kind is reported: a `files` input whose expression an
+earlier mojo changes while the build runs (a source root added outside the build directory). The task
+graph lists the value from before that change, and running a task with `-Dmojoio.only` fails (see
+[What a dry run can't see](task-graph.md#what-a-dry-run-cant-see)). If the mojo reads such a directory,
+declare it so it can be resolved without running anything: `<projectFiles/>` (as `tycho.xml` does for
+Tycho's compiler) or a fixed `<files expression="${project.basedir}/…"/>`.
+
+Nothing reports other missing inputs. So for every new declaration:
 1. Build once and read `target/mojo-io/<plugin>-<goal>-<execution>.key.txt`. It lists every input with
    what was hashed. An input that should list files but is empty is a gap: the parameter is probably
    empty by default, and the mojo falls back to something else (declare that with `expression=`).

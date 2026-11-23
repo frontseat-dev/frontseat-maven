@@ -197,6 +197,7 @@ live service, drop a file in `.mvn/plugin-io/`:
 | `mojoio.strict` | `warn` | Strict mode: report files a declared mojo writes outside its declared outputs. Such executions are never cached; `fail` fails the build (use it in CI to enforce declarations); `off` disables the check. |
 | `mojoio.strict.cleanOutputs` | `false` | Delete declared outputs before a declared mojo runs, so leftovers (e.g. classes of deleted sources) never reach a cache entry. Opt-in, because some outputs are shared or appended to (JaCoCo's `destfile`). |
 | `mojoio.only` | unset | Comma-separated project ids. Other reactor projects run no mojos; their recorded state is replayed as far as the selected project's goals need it ([rules](docs/state-format.md#replay-rules)): `-pl app -am -Dmojoio.only=app <invocation>` runs one task of `app` against its upstream modules' restored outputs. |
+| `mojoio.only.inputCheck` | `fail` | With `mojoio.only`: fail a task whose declared mojo reads files outside the build directories that the dry-run task graph didn't list, such as a source root an earlier mojo added. `warn` logs instead, `off` skips the check. See [what a dry run can't see](docs/task-graph.md#what-a-dry-run-cant-see). |
 | `mojoio.prerequisites` | `true` | Expand directly-invoked goals with their lifecycle prerequisites. |
 
 ### Why did it miss?

@@ -31,14 +31,19 @@ import org.apache.maven.execution.MavenSession;
  *       {@code artifactId}). Other projects in the reactor replay their state but run no mojos, so
  *       {@code -pl app -am -Dmojoio.only=app} builds only {@code app} against its upstream modules'
  *       restored outputs (how an external build system runs one task).</li>
+ *   <li>{@code mojoio.only.inputCheck} ({@code off}, {@code warn}, {@code fail} (default)): with
+ *       {@code mojoio.only}, compare each declared mojo's file inputs as they resolve when it runs with
+ *       what the (dry-run) task graph saw, and report paths outside the build directories the graph
+ *       missed: the build system did not hash them, and a sandbox did not get them.</li>
  *   <li>{@code mojoio.prerequisites} (default {@code true}): when a goal such as
  *       {@code surefire:test} is invoked directly, first run (or restore) the lifecycle it depends on.</li>
  * </ul>
  */
 public record MojoIoConfig(boolean enabled, boolean state, Path graphOutput, boolean cache, Path cacheDir,
                            boolean read, boolean write, boolean prerequisites, Strict strict, boolean cleanOutputs,
-                           java.util.Set<String> only, Granularity granularity) {
+                           java.util.Set<String> only, Granularity granularity, Strict inputCheck) {
 
+    /** Also the levels of {@code mojoio.only.inputCheck}. */
     public enum Strict { OFF, WARN, FAIL }
 
     /** How the task graph groups a project's executions into tasks. */
@@ -71,7 +76,8 @@ public record MojoIoConfig(boolean enabled, boolean state, Path graphOutput, boo
                 bool(user, system, "mojoio.strict.cleanOutputs", false),
                 java.util.Set.of(get(user, system, "mojoio.only", "").split("\\s*,\\s*")).stream()
                         .filter(x -> !x.isBlank()).collect(java.util.stream.Collectors.toUnmodifiableSet()),
-                Granularity.valueOf(get(user, system, "mojoio.graph.granularity", "stage").toUpperCase(java.util.Locale.ROOT)));
+                Granularity.valueOf(get(user, system, "mojoio.graph.granularity", "stage").toUpperCase(java.util.Locale.ROOT)),
+                Strict.valueOf(get(user, system, "mojoio.only.inputCheck", "fail").toUpperCase(java.util.Locale.ROOT)));
     }
 
     private static String get(Properties user, Properties system, String name, String def) {

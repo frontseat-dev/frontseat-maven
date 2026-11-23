@@ -133,6 +133,8 @@ What a build system (Nx, Bazel, Turborepo, a CI cache, …) needs, all in the gr
      old jar) are never picked up.
    - The extension replays the recorded state of everything that doesn't run: artifact files,
      attachments, generated source roots, properties like JaCoCo's `argLine`.
+   - The extension checks that every declared mojo reads only files the graph listed, and fails the task
+     otherwise (see [What a dry run can't see](#what-a-dry-run-cant-see)).
 
 Fingerprints include stamp values such as the project version, because a build system restores outputs
 byte for byte and can't rewrite the version inside them.
@@ -241,9 +243,71 @@ depends on their package tasks.
 
 A consumer should always run such executions.
 
+### What a dry run can't see
+
+The graph is exported without running anything, so every input is evaluated against the project as
+loaded. An input declared with an expression such as `${project.compileSourceRoots}` lists what that
+expression gives **before** earlier mojos change the project. When a mojo adds a source root while the
+build runs, the graph doesn't list it:
+
+- build-helper's `add-source` pointing at `src/other`;
+- Eclipse Tycho, which replaces Maven's `src/main/java` with the source folders of `build.properties`
+  during `validate-classpath`.
+
+A build system then hashes the wrong files, so a change in `src/other` doesn't invalidate the compile
+task. A sandbox (REAPI) doesn't receive the files, so the compiler finds nothing to compile and the task
+"succeeds" with missing classes.
+
+Source roots under the build directory are not affected. Generated sources (`target/generated-sources/…`)
+are outputs of earlier tasks, which the graph already orders before this one and restores with them.
+
+**The check.** When it runs a task (`-Dmojoio.only`), the extension keeps a copy of each selected
+project from before any state is replayed: that is the project the graph's dry run saw. Before each
+declared mojo runs (or is restored from mojo-io's cache), it resolves the mojo's `files` inputs twice,
+once against the live project and once against the copy. A live path is covered when it is, or lies
+under, a path of the copy. Paths under any reactor project's build directory and in the local
+repository are exempt. An uncovered path fails the task, naming the mojo, the path and the fix:
+
+```
+[ERROR] [mojo-io] INPUTS compiler:compile (default-compile) @ other-root reads a path the task graph does
+not list: src/other (input 'compileSourceRoots'). … To run anyway: -Dmojoio.only.inputCheck=warn.
+```
+
+The fix is a declaration the graph can resolve without running anything:
+- `<projectFiles/>` hashes the whole project directory (minus the build directory and nested modules),
+  whatever source roots the build ends up using. This is how `examples/plugin-io/tycho.xml` declares
+  Tycho's compiler. Put such a declaration in `.mvn/plugin-io/` to override a built-in one.
+- `<files expression="${project.basedir}/src/other"/>` (a fixed path) next to the existing input,
+  when you know the root.
+- Or have the plugin add its roots under the build directory.
+
+`-Dmojoio.only.inputCheck` takes `fail` (default), `warn` or `off`. Without `mojoio.only` (a plain
+build) nothing is checked: there is no graph to disagree with.
+
+**Why fail by default.** A missed input never shows up as an error: the build system serves a stale
+hit, or a sandbox produces an incomplete output that looks like a success and is cached as one. A
+warning in the log of one task among hundreds is easy to miss, and it comes too late, after the bad
+result is cached. Failing stops the task before the mojo runs and before anything is stored. The cost
+is false positives, which fail builds that would have been correct:
+- a path outside the workspace that an earlier mojo computes (a tool directory in a property) is
+  reported although the build system could not hash it anyway. That's still a real gap, but sometimes
+  an accepted one;
+- a build that only uses the graph for ordering, not for hashing or sandboxing, doesn't care.
+Use `warn` for those cases, per task or for the whole build.
+
+The check errs towards silence where it can't be sure. Paths are compared by location only: a broader
+dry input whose `excludes` leave out the added root still counts as covering it. It only sees declared
+mojos: an undeclared mojo always runs, and its inputs aren't in the graph at all. And it compares paths,
+not values: a `value` input an earlier mojo changes isn't reported.
+
+`DryInputCheckIT` builds a project whose compile task reads `src/other`, added by build-helper, task by
+task and as one Maven call, and asserts that the task fails. A project that generates a source root
+under `target/` builds normally.
+
 ### Limitations (v1)
 
 - **Static analysis:** values reflect configuration before anything runs. A value an earlier mojo
-  sets at runtime appears with its configured value. For example, the `destfile` of a JaCoCo agent
+  sets at runtime appears with its configured value. For file inputs, running a task catches this
+  ([What a dry run can't see](#what-a-dry-run-cant-see)). For example, the `destfile` of a JaCoCo agent
   that `prepare-agent` adds to surefire's `argLine` isn't listed as a surefire output.
 - **Undeclared mojos** are listed but have no inputs or outputs.

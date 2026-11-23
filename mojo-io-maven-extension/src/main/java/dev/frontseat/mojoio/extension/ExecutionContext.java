@@ -38,7 +38,21 @@ public final class ExecutionContext {
         this.project = project;
         this.execution = execution;
         this.normalizer = normalizer;
-        this.evaluator = new PluginParameterExpressionEvaluator(session, execution);
+        this.evaluator = new PluginParameterExpressionEvaluator(sessionFor(session, project), execution);
+    }
+
+    /**
+     * Maven's evaluator reads {@code ${project.*}} from the session's current project. To evaluate against
+     * another instance (a snapshot, see {@link DryInputCheck}), a shallow session copy points at it; the
+     * build's own session is left alone.
+     */
+    private static MavenSession sessionFor(MavenSession session, MavenProject project) {
+        if (session.getCurrentProject() == project) {
+            return session;
+        }
+        MavenSession copy = session.clone();
+        copy.setCurrentProject(project);
+        return copy;
     }
 
     /**
