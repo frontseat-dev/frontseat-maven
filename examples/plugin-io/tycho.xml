@@ -92,10 +92,14 @@
   </plugin>
 
   <plugin groupId="org.eclipse.tycho" artifactId="tycho-packaging-plugin">
-    <!-- Checks on the project model: version format and the bundle's id. -->
+    <!-- Checks that the pom's version and id match the project's own metadata (found by the audit:
+         -Dmojoio.audit). -->
     <mojo goal="validate-version">
       <inputs>
         <projectModel/>
+        <files expression="${project.basedir}/META-INF/MANIFEST.MF"/>
+        <files expression="${project.basedir}/feature.xml"/>
+        <files expression="${project.basedir}/p2iu.xml"/>
       </inputs>
     </mojo>
     <mojo goal="validate-id">
@@ -103,6 +107,7 @@
         <projectModel/>
         <files expression="${project.basedir}/META-INF/MANIFEST.MF"/>
         <files expression="${project.basedir}/feature.xml"/>
+        <files expression="${project.basedir}/p2iu.xml"/>
       </inputs>
     </mojo>
   </plugin>

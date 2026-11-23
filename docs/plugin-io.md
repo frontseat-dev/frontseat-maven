@@ -90,14 +90,51 @@ declarations are read for this, not declarations inside plugin jars.
 
 ### Checking a declaration
 
-[Strict mode](design.md#strict-mode) reports outputs a declaration misses. Nothing can report a missing
-**input**, and a missing input means stale hits. So for every new declaration:
+A missing **input** means stale hits, a missing **output** an incomplete restore. Two checks find
+them:
+
+- **Audit mode** (`-Dmojoio.audit=warn` or `fail`) observes what every mojo actually reads, writes and
+  starts, and reports what its declaration doesn't cover. See below.
+- **[Strict mode](design.md#strict-mode)** (on by default) compares the project's files before and
+  after each declared mojo, and reports writes outside its declared outputs.
+
+Then, for every new declaration:
 1. Build once and read `target/mojo-io/<plugin>-<goal>-<execution>.key.txt`. It lists every input with
    what was hashed. An input that should list files but is empty is a gap: the parameter is probably
    empty by default, and the mojo falls back to something else (declare that with `expression=`).
 2. Change each kind of input (a source file, each configuration file) and check that the mojo misses.
 
 [docs/real-projects.md](real-projects.md) has a worked example, including a first attempt that was wrong.
+
+#### Audit mode
+
+```bash
+mvn verify -Dmojoio.audit=fail     # or warn
+```
+
+Every mojo runs (the cache is off) and is observed:
+
+- **In Maven's JVM**, through Java Flight Recorder's file and process events (`jdk.FileRead`,
+  `jdk.FileWrite`, `jdk.ProcessStart`), attributed to the mojo that was running. In a parallel build
+  (`-T`, mvnd) they are attributed by thread. A mojo's helper threads then go unseen, so audit with
+  `-T1` for full coverage. Stack traces separate what Maven itself reads while a mojo runs (models,
+  dependency resolution) from what the mojo reads.
+- **In forked test JVMs**: a mojo with an `argLine` parameter (Surefire, Failsafe) gets a recording
+  option added to it for this run. Its JVMs record into files that are read when it ends. Turn this
+  off with `-Dmojoio.audit.forks=false`, for example if tests run on a JVM older than 11.
+- **Any other process** a mojo starts can't be observed. Its command line is reported.
+
+What doesn't count: the JDK, Maven's installation, the local repository, `~/.m2`, the temporary
+directory (outside the workspace), system files, mojo-io's own files, Maven's bookkeeping
+(`maven-archiver/`), declared `ignoredWrites`, and files a mojo reads back after writing them.
+
+For each execution with a declaration that allows caching, the build log gets an `AUDIT` line when it
+reads files no input covers, writes files no output covers, or starts a process. `fail` then fails the
+build at the end. `target/mojo-io-audit/mojo-io-audit.json` lists every execution with all the files
+it read and wrote, also for mojos without a declaration: a starting point for writing one.
+
+Limits: a check that a file exists, and a directory listing, open no file, so they aren't seen. Nor
+are files read by native code.
 
 ### Input kinds
 

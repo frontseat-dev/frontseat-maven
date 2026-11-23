@@ -1,0 +1,6 @@
+<plugin-io xmlns="urn:mojo-io:plugin-io:1.0">
+  <!-- Wrong on purpose: claims antrun's script reads and writes nothing. -->
+  <plugin groupId="org.apache.maven.plugins" artifactId="maven-antrun-plugin">
+    <mojo goal="run"/>
+  </plugin>
+</plugin-io>
