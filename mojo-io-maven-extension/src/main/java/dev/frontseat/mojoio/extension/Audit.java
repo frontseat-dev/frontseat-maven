@@ -175,11 +175,12 @@ public class Audit {
             run.windows.add(w);
             return w;
         }
-        if (m.getMojoDescriptor() != null && m.getMojoDescriptor().getParameterMap().containsKey("argLine")) {
+        String jvmOptions = forkOptionsParameter(m);
+        if (jvmOptions != null) {
             synchronized (run) {
                 w.forkDirectory = run.directory.resolve("forks").resolve(String.valueOf(++run.forks));
             }
-            instrumentForks(m, project, session, w, run.settings);
+            instrumentForks(m, project, session, w, run.settings, jvmOptions);
         }
         run.windows.add(w);
         return w;
@@ -211,8 +212,25 @@ public class Audit {
      * Test JVMs started through an {@code argLine} record their file events too. The option is added to
      * this execution's configuration for this run only.
      */
+    /**
+     * The parameter through which a mojo passes options to the JVMs it forks: {@code argLine}
+     * (Surefire, Failsafe) or {@code jvmArgs} (SpotBugs), as a single string.
+     */
+    static String forkOptionsParameter(MojoExecution m) {
+        if (m.getMojoDescriptor() == null || m.getMojoDescriptor().getParameterMap() == null) {
+            return null;
+        }
+        for (String name : List.of("argLine", "jvmArgs")) {
+            var p = m.getMojoDescriptor().getParameterMap().get(name);
+            if (p != null && "java.lang.String".equals(p.getType())) {
+                return name;
+            }
+        }
+        return null;
+    }
+
     private static void instrumentForks(MojoExecution m, MavenProject project, MavenSession session, Window w,
-                                        Path settings) {
+                                        Path settings, String parameter) {
         try {
             // Written for each fork: a clean of the root project may have deleted the directory.
             Files.createDirectories(w.forkDirectory);
@@ -224,21 +242,27 @@ public class Audit {
                 + ",dumponexit=true";
         Xpp3Dom original = m.getConfiguration();
         Xpp3Dom configuration = original == null ? new Xpp3Dom("configuration") : new Xpp3Dom(original);
-        Xpp3Dom argLine = configuration.getChild("argLine");
+        Xpp3Dom argLine = configuration.getChild(parameter);
         String value;
         if (argLine != null && argLine.getValue() != null) {
             value = argLine.getValue();
         } else {
-            value = m.getMojoDescriptor().getParameterMap().get("argLine").getExpression();
+            var descriptor = m.getMojoDescriptor().getParameterMap().get(parameter);
+            value = descriptor.getExpression() != null ? descriptor.getExpression() : descriptor.getDefaultValue();
             if (argLine == null) {
-                argLine = new Xpp3Dom("argLine");
+                argLine = new Xpp3Dom(parameter);
                 configuration.addChild(argLine);
             }
         }
-        if (value != null && value.contains("${argLine}") && project.getProperties().getProperty("argLine") == null
-                && session.getUserProperties().getProperty("argLine") == null
-                && session.getSystemProperties().getProperty("argLine") == null) {
-            value = value.replace("${argLine}", ""); // unset: Maven would leave the text as is
+        // An expression whose property is unset: Maven would leave the text as is.
+        java.util.regex.Matcher unset = java.util.regex.Pattern.compile("\\$\\{([^}]+)}").matcher(value == null ? "" : value);
+        while (unset.find()) {
+            String name = unset.group(1);
+            if (project.getProperties().getProperty(name) == null && session.getUserProperties().getProperty(name) == null
+                    && session.getSystemProperties().getProperty(name) == null && !name.startsWith("project.")
+                    && !name.startsWith("session.") && !name.startsWith("settings.") && !name.equals("basedir")) {
+                value = value.replace(unset.group(), "");
+            }
         }
         argLine.setValue(((value == null ? "" : value) + " " + option).trim());
         w.instrumented = m;

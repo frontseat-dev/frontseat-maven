@@ -160,6 +160,11 @@ final class ConfigurationHasher {
         String version = getter(value, "getVersion");
         String type = getter(value, "getType");
         String classifier = getter(value, "getClassifier");
+        String built = reactorContent(ctx, groupId, artifactId);
+        if (built != null) {
+            return groupId + ":" + artifactId + ":" + (type == null ? "jar" : type) + ":"
+                    + (classifier == null ? "" : classifier) + " " + built;
+        }
         if (version == null || version.isBlank()) {
             version = managedVersion(ctx, groupId, artifactId);
         }
@@ -194,6 +199,12 @@ final class ConfigurationHasher {
         String groupId = fields.get("groupId");
         String artifactId = fields.get("artifactId");
         String version = fields.get("version");
+        String built = reactorContent(ctx, groupId, artifactId);
+        if (built != null) {
+            fields.remove("version");
+            fields.put("content", built);
+            return fields.toString();
+        }
         if (version == null || version.isBlank() || "null".equals(version)) {
             version = managedVersion(ctx, groupId, artifactId);
             if (version == null) {
@@ -206,6 +217,42 @@ final class ConfigurationHasher {
                     + " can change under the same version");
         }
         return fields.toString();
+    }
+
+    /**
+     * A project of this build named by coordinates in configuration (an annotation processor, a
+     * build-tools module): its version says nothing about its content, which counts instead. Null for
+     * anything else.
+     */
+    static String reactorContent(ExecutionContext ctx, String groupId, String artifactId) throws NotCacheableException {
+        java.nio.file.Path artifact = reactorArtifact(ctx.session(), groupId, artifactId);
+        if (artifact == null) {
+            return null;
+        }
+        if (!java.nio.file.Files.exists(artifact)) {
+            throw new NotCacheableException("artifact " + groupId + ":" + artifactId
+                    + " is built in this reactor but not yet: its content is unknown");
+        }
+        return "built in this reactor, content " + dev.frontseat.mojoio.cache.FileTrees.hash(artifact);
+    }
+
+    /**
+     * The main artifact (a jar, or classes directory before packaging) of the reactor project
+     * {@code groupId:artifactId}; a non-existent path if it has none yet; {@code null} if no project of
+     * this build has these coordinates.
+     */
+    static java.nio.file.Path reactorArtifact(org.apache.maven.execution.MavenSession session, String groupId,
+                                              String artifactId) {
+        if (session == null || groupId == null || artifactId == null) {
+            return null;
+        }
+        for (org.apache.maven.project.MavenProject p : session.getAllProjects()) {
+            if (p.getGroupId().equals(groupId) && p.getArtifactId().equals(artifactId)) {
+                java.io.File f = p.getArtifact() == null ? null : p.getArtifact().getFile();
+                return f == null ? java.nio.file.Path.of(p.getBuild().getDirectory(), "missing-artifact") : f.toPath();
+            }
+        }
+        return null;
     }
 
     private static String managedVersion(ExecutionContext ctx, String groupId, String artifactId) {

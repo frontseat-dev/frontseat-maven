@@ -110,6 +110,16 @@ public final class ExecutionContext {
      * expression. A node with children evaluates to a list of its children's values.
      */
     public Object parameter(String name) throws NotCacheableException {
+        int dot = name.indexOf('.');
+        if (dot > 0) {
+            // A value inside a parameter of nested configuration, e.g. archive.manifestFile.
+            Object outer = parameter(name.substring(0, dot));
+            Xpp3Dom node = parameterNode(name.substring(0, dot));
+            for (String part : name.substring(dot + 1).split("\\.")) {
+                node = node == null ? null : node.getChild(part);
+            }
+            return outer == null || node == null ? null : evaluate(node);
+        }
         if (execution.getMojoDescriptor() != null && execution.getMojoDescriptor().getParameterMap() != null
                 && !execution.getMojoDescriptor().getParameterMap().containsKey(name)) {
             // A declaration written for another version of the plugin: refuse rather than hash nothing.
