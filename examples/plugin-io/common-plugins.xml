@@ -116,8 +116,6 @@
     <mojo goal="cmp">
       <inputs>
         <files expression="${project.artifact.file}"/>
-        <!-- module-info.java given as a file (found by the audit on gson). -->
-        <files parameter="module.moduleInfoFile"/>
         <testClasspath ownOutputs="false"/>
       </inputs>
       <outputs>
@@ -146,7 +144,8 @@
   <plugin groupId="org.spdx" artifactId="spdx-maven-plugin">
     <mojo goal="createSPDX">
       <inputs>
-        <projectModel/>
+        <!-- It reads the models of the reactor projects it depends on too (found by the audit). -->
+        <reactorModels/>
         <projectFiles/>
         <testClasspath ownOutputs="false"/>
         <files expression="${project.artifact.file}"/>
@@ -158,13 +157,15 @@
   </plugin>
 
   <!-- Rewrites the project's jar in place, adding a module descriptor computed from the jar, the
-       configuration and the dependencies. Not covered: a module-info source file named inside the
-       configuration (moduleInfoFile); declare it as an extra <files> input in the project. The jar as jar:jar left it is the input; the rewritten jar is
-       the (observed) output. -->
+       configuration and the dependencies, or from a module-info.java the configuration names
+       (module.moduleInfoFile; found by the audit, -Dmojoio.audit, on gson). Not covered: the
+       moduleInfoFile of entries in a <modules> list. The jar as jar:jar left it is the input; the
+       rewritten jar is the (observed) output. -->
   <plugin groupId="org.moditect" artifactId="moditect-maven-plugin">
     <mojo goal="add-module-info">
       <inputs>
         <files expression="${project.artifact.file}"/>
+        <files parameter="module.moduleInfoFile"/>
         <testClasspath ownOutputs="false"/>
       </inputs>
       <outputs>
