@@ -56,6 +56,9 @@
         <!-- compilePath starts with the mojo's own target/classes; hashing it would make the key
              depend on the previous run's outputs. -->
         <classpath parameter="compilePath" excludeParameter="outputDirectory"/>
+        <!-- javac finds annotation processors through the classpath, its own output included: the
+             service files resources copied there (found by the audit, -Dmojoio.audit). -->
+        <files expression="${project.build.outputDirectory}/META-INF/services"/>
       </inputs>
       <outputs>
         <directory parameter="outputDirectory" includes="**/*.class"/>
@@ -93,6 +96,8 @@
       <inputs>
         <files parameter="classesDirectory"/>
         <files expression="${project.file}"/>
+        <!-- A manifest made by another mojo (maven-bundle-plugin's target/osgi/MANIFEST.MF). -->
+        <files parameter="archive.manifestFile"/>
       </inputs>
       <outputs>
         <file parameter="outputDirectory" name="{finalName}{-classifier}.jar"/>
@@ -104,6 +109,7 @@
       <inputs>
         <files parameter="testClassesDirectory"/>
         <files expression="${project.file}"/>
+        <files parameter="archive.manifestFile"/>
       </inputs>
       <outputs>
         <file parameter="outputDirectory" name="{finalName}{-classifier}.jar"/>

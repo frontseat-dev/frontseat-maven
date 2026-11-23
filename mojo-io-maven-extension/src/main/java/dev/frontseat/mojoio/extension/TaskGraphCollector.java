@@ -154,7 +154,7 @@ public class TaskGraphCollector {
         return new ArrayList<>(found);
     }
 
-    private static void collectReferences(Object configuration, java.util.Set<String> reactorIds, java.util.Set<String> found) {
+    static void collectReferences(Object configuration, java.util.Set<String> reactorIds, java.util.Set<String> found) {
         if (!(configuration instanceof org.codehaus.plexus.util.xml.Xpp3Dom node)) {
             return;
         }

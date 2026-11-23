@@ -116,6 +116,8 @@
     <mojo goal="cmp">
       <inputs>
         <files expression="${project.artifact.file}"/>
+        <!-- module-info.java given as a file (found by the audit on gson). -->
+        <files parameter="module.moduleInfoFile"/>
         <testClasspath ownOutputs="false"/>
       </inputs>
       <outputs>

@@ -455,6 +455,37 @@ public class MojoIoExecutionStrategy implements MojosExecutionStrategy {
         } finally {
             dependencies.restore();
         }
+        // Reactor projects named in the configuration count by content (see ConfigurationHasher).
+        List<java.nio.file.Path> configured = new ArrayList<>();
+        java.util.Set<String> reactorIds = new java.util.HashSet<>();
+        session.getAllProjects().forEach(p -> reactorIds.add(p.getGroupId() + ":" + p.getArtifactId()));
+        if (m.getConfiguration() != null) {
+            org.codehaus.plexus.util.xml.Xpp3Dom configuration = m.getConfiguration();
+            java.util.Set<String> named = new java.util.LinkedHashSet<>();
+            TaskGraphCollector.collectReferences(configuration, reactorIds, named);
+            for (String id : named) {
+                java.nio.file.Path artifact = ConfigurationHasher.reactorArtifact(session, id.split(":")[0], id.split(":")[1]);
+                if (artifact != null) {
+                    configured.add(artifact);
+                }
+            }
+        }
+        // The effective model stands for the pom files it comes from: the project's and its parents', or
+        // those of the whole reactor.
+        boolean projectModel = inputs.stream().anyMatch(i -> i.name().equals("projectModel"));
+        boolean reactorModels = inputs.stream().anyMatch(i -> i.name().equals("reactorModels"));
+        List<java.nio.file.Path> poms = new ArrayList<>();
+        if (projectModel || reactorModels) {
+            for (MavenProject p : reactorModels ? session.getAllProjects() : List.of(project)) {
+                for (MavenProject cur = p; cur != null && cur.getFile() != null; cur = cur.getParent()) {
+                    poms.add(cur.getFile().toPath().toAbsolutePath().normalize());
+                }
+            }
+            inputs.add(dev.frontseat.mojoio.extension.descriptor.ResolvedInput.files("poms", poms));
+        }
+        if (!configured.isEmpty()) {
+            inputs.add(dev.frontseat.mojoio.extension.descriptor.ResolvedInput.classpath("configuration", configured, null));
+        }
         return new Audit.Coverage(inputs, resolvedOutputs(ctx, d), d.ignoredWrites(), d.source(), cacheable, unresolved);
     }
 
