@@ -22,6 +22,9 @@ import org.apache.maven.execution.MavenSession;
  *   <li>{@code mojoio.cache.enabled} (default {@code true}): the built-in local cache.</li>
  *   <li>{@code mojoio.cache.dir} (default {@code ~/.m2/mojo-io-cache}),
  *       {@code mojoio.cache.read} / {@code mojoio.cache.write} (default {@code true}).</li>
+ *   <li>{@code mojoio.audit} ({@code off} (default), {@code warn}, {@code fail}): observe the files
+ *       every mojo reads and writes and the processes it starts, and report what its declaration does not
+ *       cover (see Audit). Turns the cache off.</li>
  *   <li>{@code mojoio.strict} ({@code off}, {@code warn} (default), {@code fail}): report files a declared
  *       mojo writes outside its declared outputs; such executions are never stored, and {@code fail}
  *       fails the build.</li>
@@ -62,7 +65,8 @@ public record MojoIoConfig(boolean enabled, boolean state, Path graphOutput, boo
                 bool(user, system, "mojoio.enabled", true),
                 bool(user, system, "mojoio.state.enabled", true),
                 graph == null ? null : base.resolve(graph).toAbsolutePath().normalize(),
-                bool(user, system, "mojoio.cache.enabled", true),
+                // An audit runs every mojo, to observe it.
+                bool(user, system, "mojoio.cache.enabled", true) && Audit.mode(session) == Audit.Mode.OFF,
                 Paths.get(dir).toAbsolutePath().normalize(),
                 bool(user, system, "mojoio.cache.read", true),
                 bool(user, system, "mojoio.cache.write", true),
