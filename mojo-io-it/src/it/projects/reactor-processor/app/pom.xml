@@ -10,6 +10,17 @@
   </parent>
   <artifactId>app</artifactId>
 
+  <dependencies>
+    <!-- Only for the build order (parallel builders, mvnd). Its pom, so the jar stays off the
+         classpath: the processor path is the only way the processor reaches the key. -->
+    <dependency>
+      <groupId>com.example.samples</groupId>
+      <artifactId>processor</artifactId>
+      <version>1.0.0</version>
+      <type>pom</type>
+    </dependency>
+  </dependencies>
+
   <build>
     <plugins>
       <plugin>
