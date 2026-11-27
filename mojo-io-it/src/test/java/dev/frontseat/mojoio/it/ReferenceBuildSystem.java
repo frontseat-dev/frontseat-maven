@@ -173,7 +173,8 @@ final class ReferenceBuildSystem {
         Files.createDirectories(tmp);
         List<String> undeclared = new ArrayList<>();
         for (Map.Entry<Path, String> f : snapshot(sandbox).entrySet()) {
-            if (f.getValue().equals(before.get(f.getKey())) || ignored(task, buildDir, f.getKey())) {
+            if (f.getValue().equals(before.get(f.getKey())) || ignored(task, buildDir, f.getKey())
+                    || f.getKey().startsWith(sandbox.resolve(".mvn/target"))) { // Maven 4's project-local repository
                 continue;
             }
             if (!cacheable || declared(task, dir, f.getKey())) {
