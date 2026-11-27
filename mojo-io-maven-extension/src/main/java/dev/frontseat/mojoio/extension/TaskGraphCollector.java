@@ -259,7 +259,6 @@ public class TaskGraphCollector {
         Optional<MojoCacheDescriptor> descriptor = registry.find(m, session)
                 .map(d -> ForkedGoals.merge(m, project, session, registry, d));
         e.put("declaredBy", descriptor.map(MojoCacheDescriptor::source).orElse(null));
-        e.put("stamping", descriptor.map(d -> d.stampingCarry() ? "carry" : "exact").orElse("exact"));
         // Bookkeeping the execution (or Maven itself) writes in the build directory: not outputs. Build
         // systems must leave these out of observed outputs, or they make hashes unstable.
         List<String> ignoredWrites = new ArrayList<>(MAVEN_WRITES);

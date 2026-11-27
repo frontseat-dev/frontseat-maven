@@ -78,7 +78,6 @@
         "runTogether": { "type": ["string", "null"], "description": "Executions sharing this value (a phase and its pre-/post- or before:/after: hooks) must run in one Maven invocation: hooks hold process-local state such as a started server." },
         "fingerprint": { "type": ["string", "null"], "description": "Hash of what a build system cannot hash itself: plugin coordinates and dependencies, goal, JDK, evaluated configuration and value inputs. Includes stamp values. Null when not cacheable." },
         "declaredBy": { "type": ["string", "null"], "description": "Source of the plugin-io declaration (project file, plugin jar, built-in), null if undeclared." },
-        "stamping": { "enum": ["exact", "carry"], "description": "exact: stamp values (project version, build numbers) are inputs; carry: the execution only copies them into outputs (see docs/versioning.md)." },
         "cacheable": { "type": "boolean" },
         "reason": { "type": ["string", "null"], "description": "Why the execution is not cacheable." },
         "inputs": { "type": "array", "items": { "$ref": "#/$defs/input" } },

@@ -2,7 +2,7 @@
 <!--
   app compiles with an annotation processor built by this reactor (processor), named only in
   annotationProcessorPaths, with a release version. The processor's version says nothing about its
-  content: a change to it must reach app's compile key.
+  content: a change to it must reach app's compile task.
 -->
 <project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"

@@ -32,7 +32,7 @@ import org.xml.sax.SAXException;
  *     <mojo goal="compile">
  *       <inputs>
  *         <files parameter="compileSourceRoots"/>
- *         <classpath parameter="compilePath" excludeParameter="outputDirectory"/>
+ *         <classpath parameter="compilePath"/>
  *       </inputs>
  *       <outputs>
  *         <directory parameter="outputDirectory" includes="**&#47;*.class"/>
@@ -121,7 +121,7 @@ public final class PluginIoReader {
         try {
             return new MojoIo(goal, cacheable == null || Boolean.parseBoolean(cacheable), attr(mojo, "reason"),
                     declarations(mojo, "inputs"), declarations(mojo, "outputs"),
-                    ignored, ignoredWrites, "carry".equals(attr(mojo, "stamping")));
+                    ignored, ignoredWrites);
         } catch (PluginIoException e) {
             throw new PluginIoException(source + ": " + e.getMessage(), e);
         }

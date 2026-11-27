@@ -12,7 +12,7 @@
 
   <dependencies>
     <!-- Only for the build order (parallel builders, mvnd). Its pom, so the jar stays off the
-         classpath: the processor path is the only way the processor reaches the key. -->
+         classpath: the processor path is the only way the processor reaches the compiler. -->
     <dependency>
       <groupId>com.example.samples</groupId>
       <artifactId>processor</artifactId>

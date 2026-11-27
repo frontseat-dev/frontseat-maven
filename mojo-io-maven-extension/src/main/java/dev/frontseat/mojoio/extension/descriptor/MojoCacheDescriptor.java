@@ -29,7 +29,6 @@ public final class MojoCacheDescriptor {
     private final List<OutputSpec> outputs;
     private final Set<String> ignoredParameters;
     private final String source;
-    private final boolean stampingCarry;
     private final List<String> ignoredWrites;
     private final boolean reactorWide;
 
@@ -37,7 +36,6 @@ public final class MojoCacheDescriptor {
         this.ignoredWrites = List.copyOf(b.ignoredWrites);
         this.reactorWide = b.reactorWide;
         this.source = b.source;
-        this.stampingCarry = b.stampingCarry;
         this.pluginKey = b.pluginKey;
         this.goal = b.goal;
         this.notCacheableReason = b.notCacheableReason;
@@ -80,14 +78,6 @@ public final class MojoCacheDescriptor {
         return ignoredParameters;
     }
 
-    /**
-     * {@code stamping="carry"}: stamp values only travel into outputs, so they are tokenized in the key
-     * and rewritten on restore. Otherwise they are part of the key.
-     */
-    public boolean stampingCarry() {
-        return stampingCarry;
-    }
-
     /** Ant patterns, relative to the build directory, of bookkeeping writes that are no outputs. */
     public List<String> ignoredWrites() {
         return ignoredWrites;
@@ -113,7 +103,6 @@ public final class MojoCacheDescriptor {
         b.outputs.addAll(outputs);
         b.ignored.addAll(ignoredParameters);
         b.source = source;
-        b.stampingCarry = stampingCarry;
         b.ignoredWrites.addAll(ignoredWrites);
         b.reactorWide = reactorWide;
         return b;
@@ -142,7 +131,6 @@ public final class MojoCacheDescriptor {
         private final List<OutputSpec> outputs = new ArrayList<>();
         private final Set<String> ignored = new LinkedHashSet<>();
         private String source = "code";
-        private boolean stampingCarry;
         private final List<String> ignoredWrites = new ArrayList<>();
         private boolean reactorWide;
 
@@ -177,11 +165,6 @@ public final class MojoCacheDescriptor {
 
         public Builder reactorWide(boolean reactorWide) {
             this.reactorWide = reactorWide;
-            return this;
-        }
-
-        public Builder stampingCarry(boolean carry) {
-            this.stampingCarry = carry;
             return this;
         }
 

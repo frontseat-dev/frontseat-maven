@@ -21,10 +21,10 @@ class PluginIoReaderTest {
     private static final String DOC = """
             <plugin-io xmlns="urn:mojo-io:plugin-io:1.0">
               <plugin groupId="org.example" artifactId="gen-maven-plugin">
-                <mojo goal="generate" stamping="carry">
+                <mojo goal="generate">
                   <inputs>
                     <files parameter="schemaDirectory"/>
-                    <classpath parameter="pluginClasspath" excludeParameter="outputDirectory"/>
+                    <classpath parameter="pluginClasspath"/>
                   </inputs>
                   <outputs>
                     <directory parameter="outputDirectory" includes="**/*.java"/>
@@ -46,15 +46,13 @@ class PluginIoReaderTest {
         MojoIo generate = plugin.mojo("generate").orElseThrow();
         assertTrue(generate.cacheable());
         assertEquals(List.of("files", "classpath"), generate.inputs().stream().map(IoDeclaration::kind).toList());
-        assertEquals("outputDirectory", generate.inputs().get(1).required("excludeParameter"));
+        assertEquals("pluginClasspath", generate.inputs().get(1).required("parameter"));
         assertEquals("**/*.java", generate.outputs().get(0).required("includes"));
         assertEquals(Set.of("verbose", "quiet", "logLevel"), generate.ignoredParameters());
-        assertTrue(generate.stampingCarry());
         assertEquals(Set.of("gen-status/**", "*.lock"), generate.ignoredWrites());
 
         MojoIo publish = plugin.mojo("publish").orElseThrow();
         assertFalse(publish.cacheable());
-        assertFalse(publish.stampingCarry(), "exact is the default");
         assertEquals("talks to a server", publish.reason());
     }
 

@@ -1,20 +1,20 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
   Declarations for plugins that many builds bind in every module (for example through a company or
-  Apache parent pom). Copy into a project's .mvn/plugin-io/ to cache them. Verified on Apache Commons
+  Apache parent pom). Copy into a project's .mvn/plugin-io/ to make them cacheable. Verified on Apache Commons
   Numbers (docs/real-projects.md).
 
   Each of them is cheap. They matter for build systems that cache whole tasks (Nx, a remote execution
   grid): one undeclared mojo makes its whole task uncacheable.
 
   Not built in, because each covers the usual configurations only. Read the note on a mojo before
-  relying on it, and check its key manifest (target/mojo-io/<plugin>-<goal>-<execution>.key.txt).
+  relying on it, and check the inputs the task graph lists for it (-Dmojoio.graph.output=graph.json).
 -->
 <plugin-io xmlns="urn:mojo-io:plugin-io:1.0">
 
   <!-- Rules on the project (versions, plugins), on its dependencies (convergence, banned dependencies:
        the models of every project of the build and the resolved classpath), the Maven version and the
-       JDK (always in the key). Not covered: rules that read the environment, the OS or files
+       JDK (always in the fingerprint). Not covered: rules that read the environment, the OS or files
        (requireEnvironmentVariable, requireOS, requireFilesExist, …), and changed SNAPSHOT dependencies
        from outside the build. -->
   <plugin groupId="org.apache.maven.plugins" artifactId="maven-enforcer-plugin">
@@ -22,7 +22,7 @@
       <inputs>
         <projectModel/>
         <reactorModels/>
-        <testClasspath ownOutputs="false"/>
+        <testClasspath/>
         <mavenVersion/>
       </inputs>
     </mojo>
@@ -64,7 +64,7 @@
     <mojo goal="process">
       <inputs>
         <projectModel/>
-        <testClasspath ownOutputs="false"/>
+        <testClasspath/>
         <files parameter="appendedResourcesDirectory"/>
       </inputs>
       <outputs>
@@ -78,7 +78,7 @@
     <mojo goal="manifest">
       <inputs>
         <files expression="${project.build.outputDirectory}"/>
-        <testClasspath ownOutputs="false"/>
+        <testClasspath/>
         <projectModel/>
       </inputs>
       <outputs>
@@ -116,7 +116,7 @@
     <mojo goal="cmp">
       <inputs>
         <files expression="${project.artifact.file}"/>
-        <testClasspath ownOutputs="false"/>
+        <testClasspath/>
       </inputs>
       <outputs>
         <observed/>
@@ -132,7 +132,7 @@
     <mojo goal="makeAggregateBom">
       <inputs>
         <reactorModels/>
-        <testClasspath ownOutputs="false"/>
+        <testClasspath/>
       </inputs>
       <outputs>
         <observed/>
@@ -147,7 +147,7 @@
         <!-- It reads the models of the reactor projects it depends on too. -->
         <reactorModels/>
         <projectFiles/>
-        <testClasspath ownOutputs="false"/>
+        <testClasspath/>
         <files expression="${project.artifact.file}"/>
       </inputs>
       <outputs>
@@ -166,7 +166,7 @@
       <inputs>
         <files expression="${project.artifact.file}"/>
         <files parameter="module.moduleInfoFile"/>
-        <testClasspath ownOutputs="false"/>
+        <testClasspath/>
       </inputs>
       <outputs>
         <observed/>

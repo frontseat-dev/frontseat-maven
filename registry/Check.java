@@ -27,7 +27,7 @@ import org.w3c.dom.Node;
 public class Check {
 
     static final String NS = "urn:mojo-io:plugin-io:1.0";
-    static final List<String> REF_ATTRS = List.of("parameter", "excludeParameter", "resourcesParameter",
+    static final List<String> REF_ATTRS = List.of("parameter", "resourcesParameter",
             "outputDirectoryParameter", "nameParameter");
 
     record Decl(Set<String> refs, Set<String> ignored) {}
