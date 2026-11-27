@@ -12,7 +12,10 @@ import org.apache.maven.project.MavenProject;
 import org.codehaus.plexus.component.configurator.expression.ExpressionEvaluationException;
 import org.codehaus.plexus.util.xml.Xpp3Dom;
 
-/** Everything a descriptor needs to compute inputs and collect outputs for one mojo execution. */
+/**
+ * Everything a descriptor needs to describe the inputs and outputs of one mojo execution in the task
+ * graph. The mojo does not run and no dependencies are resolved: classpaths are described by scope.
+ */
 public final class ExecutionContext {
 
     private final MavenSession session;
@@ -20,63 +23,14 @@ public final class ExecutionContext {
     private final MojoExecution execution;
     private final PathNormalizer normalizer;
     private final PluginParameterExpressionEvaluator evaluator;
-    private final boolean analysisOnly;
 
     public ExecutionContext(MavenSession session, MavenProject project, MojoExecution execution,
                             PathNormalizer normalizer) {
-        this(session, project, execution, normalizer, false);
-    }
-
-    /**
-     * @param analysisOnly the mojo will not run and dependencies are not resolved (graph export):
-     *                     inputs that need resolution are described, not listed
-     */
-    public ExecutionContext(MavenSession session, MavenProject project, MojoExecution execution,
-                            PathNormalizer normalizer, boolean analysisOnly) {
-        this.analysisOnly = analysisOnly;
         this.session = session;
         this.project = project;
         this.execution = execution;
         this.normalizer = normalizer;
         this.evaluator = new PluginParameterExpressionEvaluator(session, execution);
-    }
-
-    /**
-     * A resolved classpath: files hashed by content, and entries identified by an immutable version
-     * instead (see {@link dev.frontseat.mojoio.extension.DependencyResolution#testClasspath}).
-     */
-    public record Classpath(List<java.nio.file.Path> paths, List<String> versioned) {}
-
-    /** How to resolve the project's test classpath on demand (absent in unit tests and graph export). */
-    public interface TestClasspath {
-        Classpath resolve() throws NotCacheableException;
-    }
-
-    private TestClasspath testClasspath;
-    private Classpath resolvedTestClasspath;
-
-    public ExecutionContext withTestClasspath(TestClasspath resolver) {
-        this.testClasspath = resolver;
-        return this;
-    }
-
-    public TestClasspath testClasspathResolver() {
-        return testClasspath;
-    }
-
-    /** The resolved test classpath, or {@code null} when this context cannot resolve one itself. */
-    public Classpath testClasspath() throws NotCacheableException {
-        if (testClasspath == null) {
-            return null;
-        }
-        if (resolvedTestClasspath == null) {
-            resolvedTestClasspath = testClasspath.resolve();
-        }
-        return resolvedTestClasspath;
-    }
-
-    public boolean analysisOnly() {
-        return analysisOnly;
     }
 
     public MavenSession session() {

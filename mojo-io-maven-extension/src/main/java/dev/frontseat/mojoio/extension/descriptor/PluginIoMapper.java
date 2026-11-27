@@ -46,8 +46,8 @@ final class PluginIoMapper {
             case "files" -> Inputs.excluding(d.attribute("expression").isPresent()
                     ? Inputs.filesAt(d.required("expression"))
                     : Inputs.files(d.required("parameter")), split(d.attribute("excludes").orElse("")));
-            case "classpath" -> Inputs.classpath(d.required("parameter"), d.attribute("excludeParameter").orElse(null));
-            case "testClasspath" -> Inputs.testClasspath(!"false".equals(d.attribute("ownOutputs").orElse("true")));
+            case "classpath" -> Inputs.classpath(d.required("parameter"));
+            case "testClasspath" -> Inputs.testClasspath();
             case "projectFiles" -> Inputs.projectFiles(split(d.attribute("excludes").orElse("")));
             case "projectModel" -> Inputs.projectModel();
             case "reactorModels" -> Inputs.reactorModels();

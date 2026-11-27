@@ -4,7 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import dev.frontseat.mojoio.cache.CacheEntry;
+import dev.frontseat.mojoio.spec.StateChange;
 import java.io.File;
 import java.nio.file.Path;
 import java.util.List;
@@ -30,8 +30,8 @@ class ProjectStateTest {
         MavenProject project = project();
         ProjectState before = ProjectState.capture(project);
         System.setProperty(name, "/work/p/target/port.txt");
-        List<CacheEntry.StateRecord> diff = before.diff(ProjectState.capture(project), n);
-        assertEquals(List.of(new CacheEntry.StateRecord("systemProperty", name, "@@BASEDIR@@/target/port.txt")), diff);
+        List<StateChange> diff = before.diff(ProjectState.capture(project), n);
+        assertEquals(List.of(new StateChange("systemProperty", name, "@@BASEDIR@@/target/port.txt")), diff);
 
         System.clearProperty(name);
         ProjectState.apply(diff, project, n, null);
@@ -59,11 +59,11 @@ class ProjectStateTest {
         project.setContextValue("plain", "/work/p/target/x");
         owner.setContextValue("DeclarativeServicesMojoHeader", "OSGI-INF/a.xml");
         owner.setContextValue("someObject", new Object()); // not text: not recorded
-        List<CacheEntry.StateRecord> diff = before.diff(ProjectState.capture(project, false), n);
+        List<StateChange> diff = before.diff(ProjectState.capture(project, false), n);
         String nested = "@" + ContextOwner.class.getName() + "#DeclarativeServicesMojoHeader";
         assertEquals(List.of(
-                new CacheEntry.StateRecord("contextValue", nested, "OSGI-INF/a.xml"),
-                new CacheEntry.StateRecord("contextValue", "plain", "@@BASEDIR@@/target/x")), diff);
+                new StateChange("contextValue", nested, "OSGI-INF/a.xml"),
+                new StateChange("contextValue", "plain", "@@BASEDIR@@/target/x")), diff);
 
         // Another JVM: the owner is under another key; the record names it by class.
         MavenProject replayed = project();

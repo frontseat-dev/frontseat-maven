@@ -1,10 +1,11 @@
-package dev.frontseat.mojoio.cache;
+package dev.frontseat.mojoio.spec;
 
 import java.util.List;
 import java.util.regex.Pattern;
 
 /**
- * Ant-style path patterns as used by Maven resources and file sets: {@code **} matches any number of
+ * Ant-style path patterns, as used by Maven resources and file sets and by the includes and excludes of
+ * plugin-io declarations and the task graph: {@code **} matches any number of
  * directories, {@code *} any characters within one path segment, {@code ?} one character. A pattern
  * ending in '/' is treated as ending in '/**'. Paths use '/' separators.
  */

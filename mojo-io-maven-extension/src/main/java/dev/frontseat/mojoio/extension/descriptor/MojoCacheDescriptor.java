@@ -6,11 +6,11 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * Executable form of a plugin-io declaration: how one plugin goal is cached: which inputs go into the key, which files are its outputs,
- * which configuration parameters to leave out of the configuration hash.
+ * Executable form of a plugin-io declaration: what one plugin goal reads (its inputs), which files are
+ * its outputs, and which configuration parameters to leave out of its fingerprint.
  *
- * <p>The effective configuration is always hashed, so inputs only need to cover what the configuration
- * hash cannot see: the <em>content</em> of files and directories it points at.
+ * <p>The effective configuration is always part of the fingerprint, so inputs only need to cover what it
+ * cannot see: the <em>content</em> of files and directories it points at.
  */
 public final class MojoCacheDescriptor {
 
@@ -88,7 +88,7 @@ public final class MojoCacheDescriptor {
         return stampingCarry;
     }
 
-    /** Ant patterns, relative to the build directory, of bookkeeping writes strict mode does not report. */
+    /** Ant patterns, relative to the build directory, of bookkeeping writes that are no outputs. */
     public List<String> ignoredWrites() {
         return ignoredWrites;
     }
@@ -101,7 +101,7 @@ public final class MojoCacheDescriptor {
         return reactorWide;
     }
 
-    /** Where this descriptor came from (built-in, plugin, project file); shown in key manifests. */
+    /** Where this descriptor came from (built-in, plugin, project file); the graph's declaredBy. */
     public String source() {
         return source;
     }

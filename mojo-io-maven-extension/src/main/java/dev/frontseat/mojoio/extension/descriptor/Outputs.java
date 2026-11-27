@@ -1,6 +1,5 @@
 package dev.frontseat.mojoio.extension.descriptor;
 
-import dev.frontseat.mojoio.cache.FileTrees;
 import dev.frontseat.mojoio.extension.ExecutionContext;
 import dev.frontseat.mojoio.extension.NotCacheableException;
 import java.nio.file.Path;
@@ -95,7 +94,7 @@ public final class Outputs {
     /**
      * Whatever the mojo writes in the build directory while it runs (patterns relative to it). For mojos
      * that run code with hooks of its own: tests, agents such as JaCoCo writing coverage inside the test
-     * JVM, forked tools. Measured from a before/after snapshot of the module.
+     * JVM, forked tools. Known only after the run: the build system takes what the execution wrote there.
      */
     public static OutputSpec observed(List<String> includes, List<String> excludes) {
         return ctx -> List.of(new ResolvedOutput("observed",

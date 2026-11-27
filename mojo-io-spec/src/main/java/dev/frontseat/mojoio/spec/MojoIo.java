@@ -15,7 +15,7 @@ import java.util.Set;
  * @param ignoredParameters parameters that cannot affect outputs (logging, process plumbing)
  * @param ignoredWrites     Ant patterns, relative to the project build directory, for files the mojo
  *                          writes that are bookkeeping rather than outputs (e.g. the compiler's
- *                          {@code maven-status/**}); strict mode does not report them
+ *                          {@code maven-status/**}); build systems leave them out of observed outputs
  * @param stampingCarry     {@code stamping="carry"}: the mojo only copies stamp values (project version,
  *                          build numbers) into its outputs, so they are excluded from the key and
  *                          rewritten on restore; otherwise ({@code exact}) they stay in the key

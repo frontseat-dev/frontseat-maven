@@ -75,47 +75,6 @@
         </executions>
       </plugin>
       <plugin>
-        <!-- Always runs (never cached) and asks Maven for no dependency resolution: after it, the
-             project has no resolved artifacts. Deletes nothing. -->
-        <groupId>org.apache.maven.plugins</groupId>
-        <artifactId>maven-clean-plugin</artifactId>
-        <version>3.4.0</version>
-        <executions>
-          <execution>
-            <id>no-op</id>
-            <phase>process-resources</phase>
-            <goals>
-              <goal>clean</goal>
-            </goals>
-            <configuration>
-              <excludeDefaultDirectories>true</excludeDefaultDirectories>
-            </configuration>
-          </execution>
-        </executions>
-      </plugin>
-      <plugin>
-        <!-- Runs right after it and asks for no resolution either; declared (for the test) as reading
-             the classpath. -->
-        <groupId>org.codehaus.mojo</groupId>
-        <artifactId>build-helper-maven-plugin</artifactId>
-        <version>3.6.1</version>
-        <executions>
-          <execution>
-            <id>derive-property</id>
-            <phase>process-resources</phase>
-            <goals>
-              <goal>regex-property</goal>
-            </goals>
-            <configuration>
-              <name>derived</name>
-              <value>a-b</value>
-              <regex>-</regex>
-              <replacement>_</replacement>
-            </configuration>
-          </execution>
-        </executions>
-      </plugin>
-      <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-resources-plugin</artifactId>
         <version>3.3.1</version>

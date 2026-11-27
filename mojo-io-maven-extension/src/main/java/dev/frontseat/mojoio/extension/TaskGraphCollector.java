@@ -278,9 +278,9 @@ public class TaskGraphCollector {
                 && !descriptor.get().reactorWide()) {
             reason = "aggregator mojo without a reactorModels input";
         } else {
-            ExecutionContext ctx = new ExecutionContext(session, project, m, normalizer, true);
+            ExecutionContext ctx = new ExecutionContext(session, project, m, normalizer);
             try {
-                fingerprint = CacheKeyCalculator.fingerprint(ctx, descriptor.get());
+                fingerprint = Fingerprint.of(ctx, descriptor.get());
                 for (InputSpec spec : descriptor.get().inputs()) {
                     for (ResolvedInput in : spec.resolve(ctx)) {
                         inputs.add(input(in, normalizer));
@@ -607,7 +607,7 @@ public class TaskGraphCollector {
                 @Override
                 public java.nio.file.FileVisitResult visitFile(Path file, java.nio.file.attribute.BasicFileAttributes a) {
                     String rel = base.relativize(file).toString().replace('\\', '/');
-                    if (a.isRegularFile() && dev.frontseat.mojoio.cache.AntPattern.selected(rel, patterns, List.of())) {
+                    if (a.isRegularFile() && dev.frontseat.mojoio.spec.AntPattern.selected(rel, patterns, List.of())) {
                         files.add(file);
                     }
                     return java.nio.file.FileVisitResult.CONTINUE;

@@ -126,7 +126,7 @@ check(restored.ran.length === 0, `fresh checkout + shared remote cache: all ${re
 check(fingerprint(b, modules) === reference, 'fresh checkout: restored outputs identical to raw `mvn verify`');
 
 // Continue the build on restored outputs: Maven needs the replayed state (artifact files, argLine).
-const cont = sh(`${maven} -B -q -pl com.example.samples:app -am -Dmojoio.only=com.example.samples:app -Dmojoio.cache.enabled=false org.apache.maven.plugins:maven-surefire-plugin:3.5.2:test@default-test`, b);
+const cont = sh(`${maven} -B -q -pl com.example.samples:app -am -Dmojoio.only=com.example.samples:app org.apache.maven.plugins:maven-surefire-plugin:3.5.2:test@default-test`, b);
 check(fs.statSync(path.join(b, 'app/target/jacoco.exec')).size > 0, 'restored checkout continues with plain Maven: app tests run with the JaCoCo agent (replayed argLine)');
 
 // Change a lib-core test: Maven 4 phase links keep app's compile and test cached.
@@ -181,20 +181,6 @@ if (!process.env.E2E_SKIP_PERF) {
   sh('rm -rf .mvn node_modules package.json nx.json && mvn -B -q -o verify', rawChanged);
   check(fingerprint(n2, benchModules) === fingerprint(rawChanged, benchModules), `20 modules, after the change: outputs identical to raw Maven (${ch2.ran.length} of ${ch2.total} tasks re-ran)`);
 
-  // One target per module, with mojo-io's own cache on inside it: when a module's target re-runs,
-  // its mojos with unchanged inputs are restored instead of run.
-  const inner = { granularity: 'module', innerCache: true, args: [`-Dmojoio.cache.dir=${path.join(work, 'inner-cache')}`] };
-  const n3 = nxWorkspace(gen, path.join(work, 'bench-nx-inner'), inner);
-  nx(n3, 'show projects');
-  time('Nx cold, module + inner cache', () => nx(n3, 'run-many -t verify'));
-  const t3 = path.join(n3, 'm00/src/test/java/bench/m00');
-  const testFile = path.join(t3, fs.readdirSync(t3)[0]);
-  fs.appendFileSync(testFile, '\n// touched\n');
-  const in1 = time('Nx module + inner cache, after a test comment change in m00', () => nx(n3, 'run-many -t verify'));
-  const rawInner = path.join(work, 'bench-raw-inner');
-  copyDir(n3, rawInner);
-  sh('rm -rf .mvn node_modules package.json nx.json && mvn -B -q -o verify', rawInner);
-  check(fingerprint(n3, benchModules) === fingerprint(rawInner, benchModules), `module + inner cache: outputs identical to raw Maven after the change (${in1.ran.length} targets re-ran)`);
   report.push('', '| Scenario | Seconds | Tasks run / total |', '|---|---|---|',
     ...rows.map(([l, s, ran, tot]) => `| ${l} | ${s.toFixed(1)} | ${Array.isArray(ran) ? `${ran.length} / ${tot}` : ''} |`));
   console.log(`comment change ran: ${ch.ran.length}, new class ran: ${ch2.ran.length} tasks`);

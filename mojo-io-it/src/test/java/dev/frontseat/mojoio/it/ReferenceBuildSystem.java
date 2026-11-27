@@ -2,7 +2,7 @@ package dev.frontseat.mojoio.it;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import dev.frontseat.mojoio.cache.AntPattern;
+import dev.frontseat.mojoio.spec.AntPattern;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
@@ -114,7 +114,7 @@ final class ReferenceBuildSystem {
                 List<String> projects = new ArrayList<>(List.of(id));
                 project.path("reactorReferences").forEach(r -> projects.add(r.asText()));
                 List<String> args = new ArrayList<>(List.of("-pl", String.join(",", projects), "-am",
-                        "-Dmojoio.only=" + id, "-Dmojoio.cache.enabled=false"));
+                        "-Dmojoio.only=" + id));
                 task.executions().forEach(e -> args.add(e.get("invocation").asText()));
                 MavenBuild.Result result = maven.at(sandbox).runAllowingFailure(args.toArray(String[]::new));
                 if (result.exitCode() != 0) {

@@ -10,6 +10,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import dev.frontseat.mojoio.spec.StateChange;
+import dev.frontseat.mojoio.spec.StateFile;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -27,7 +29,7 @@ class Maven4HooksIT {
 
     @Test
     void nativeBeforeAfterHooksFormOneTaskWithCanonicalNames() throws Exception {
-        MavenBuild build = MavenBuild.checkout("it-hooks", "m4-hooks", "checkout", MavenBuild.cacheDir("m4-hooks"));
+        MavenBuild build = MavenBuild.checkout("it-hooks", "m4-hooks", "checkout");
         Path pom = build.dir().resolve("pom.xml");
         Files.writeString(pom, Files.readString(pom)
                 .replace("<phase>pre-integration-test</phase>", "<phase>before:integration-test</phase>")
@@ -51,31 +53,25 @@ class Maven4HooksIT {
                 "after:integration-test=post-integration-test"), bracket);
 
         // And a build system honouring runTogether runs the bracket (server in the Maven JVM) in one task.
-        new ReferenceBuildSystem(build, MavenBuild.cacheDir("m4-hooks-bs")).build("verify");
+        new ReferenceBuildSystem(build, MavenBuild.emptyDir("m4-hooks", "bs")).build("verify");
         assertTrue(Files.isRegularFile(build.dir().resolve("target/failsafe-reports/TEST-sample.hooks.ServerIT.xml")));
     }
 
     /**
      * The concurrent builder calls mojo-io once per lifecycle step, so recorded state is replayed before
-     * executions that then run anyway. Their own changes must still be recorded: a later hit restores them.
+     * executions that then run anyway. Their own changes must still be recorded.
      */
     @Test
     void concurrentBuilderKeepsRecordedState() throws Exception {
-        Path cache = MavenBuild.cacheDir("m4-concurrent");
-        MavenBuild build = MavenBuild.checkout("basic-multimodule", "m4-concurrent", "a", cache);
+        MavenBuild build = MavenBuild.checkout("basic-multimodule", "m4-concurrent", "a");
         build.run("compile", "-b", "concurrent");
+        Path state = build.dir().resolve("lib-core/target/mojo-io/state/maven-compiler-plugin-compile-default-compile.state");
+        List<StateChange> recorded = StateFile.read(state).changes();
+        assertEquals(2, recorded.size(), recorded.toString());
+
         Path greeter = build.dir().resolve("lib-core/src/main/java/sample/core/Greeter.java");
         Files.writeString(greeter, Files.readString(greeter).replace("\", \" + name", "\", dear \" + name"));
-
-        MavenBuild.Result changed = build.run("compile", "-b", "concurrent");
-        assertTrue(changed.log().contains("MISS  compiler:compile (default-compile) @ lib-core"), changed.log());
-        assertTrue(changed.log().matches("(?s).*MISS  compiler:compile \\(default-compile\\) @ lib-core \\[\\w+] "
-                + "stored 1 file\\(s\\), 2 state change\\(s\\).*"), "replayed changes merged back\n" + changed.log());
-
-        MavenBuild fresh = MavenBuild.checkout("basic-multimodule", "m4-concurrent", "b", cache);
-        Files.writeString(fresh.dir().resolve("lib-core/src/main/java/sample/core/Greeter.java"), Files.readString(greeter));
-        MavenBuild.Result hit = fresh.run("compile", "-b", "concurrent");
-        assertTrue(hit.log().matches("(?s).*HIT   compiler:compile \\(default-compile\\) @ lib-core \\[\\w+] "
-                + "restored 1 file\\(s\\), 2 state change\\(s\\).*"), hit.log());
+        build.run("compile", "-b", "concurrent");
+        assertEquals(recorded, StateFile.read(state).changes(), "replayed changes merged back");
     }
 }

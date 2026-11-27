@@ -39,7 +39,7 @@
   <dependencies>
     <dependency>
       <groupId>dev.frontseat.mojoio</groupId>
-      <artifactId>mojo-io-cache</artifactId>
+      <artifactId>mojo-io-spec</artifactId>
       <version>${project.version}</version>
     </dependency>
     <dependency>

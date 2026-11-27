@@ -86,10 +86,10 @@ jobs:
             code=$(curl -s -L -o /dev/null -w '%{http_code}' -u "${GITHUB_ACTOR}:${GITHUB_TOKEN}" "${repo}/$1/${VERSION}/$1-${VERSION}.pom")
             [ "$code" = 200 ]
           }
-          # The REAPI adapter resolves mojo-io-cache from the local repository.
+          # The REAPI adapter resolves mojo-io-spec from the local repository.
           mvn -B install -DskipTests -DskipITs
           modules=""
-          for m in mojo-io-parent:. mojo-io-spec:mojo-io-spec mojo-io-cache:mojo-io-cache mojo-io-maven-extension:mojo-io-maven-extension; do
+          for m in mojo-io-parent:. mojo-io-spec:mojo-io-spec mojo-io-maven-extension:mojo-io-maven-extension; do
             if published "${m%%:*}"; then echo "${m%%:*} ${VERSION} is already published"; else modules="${modules:+$modules,}${m#*:}"; fi
           done
           if [ -n "$modules" ]; then mvn -B deploy -DskipTests -DskipITs -pl "$modules"; fi

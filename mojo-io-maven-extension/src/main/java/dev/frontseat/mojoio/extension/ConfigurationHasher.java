@@ -17,6 +17,10 @@ import org.codehaus.plexus.util.xml.Xpp3Dom;
  *
  * <p>Values of types we cannot render deterministically (Maven model objects, components, ...) make the
  * execution non-cacheable, unless the descriptor lists the parameter as ignored.
+ *
+ * <p>An artifact named by coordinates counts by its version, which must name fixed content. One built in
+ * this reactor is marked as such instead: the task graph makes the execution's task depend on that
+ * project's tasks, so the build system hashes its content.
  */
 final class ConfigurationHasher {
 
@@ -76,7 +80,7 @@ final class ConfigurationHasher {
 
     /**
      * Surefire/failsafe "late replacement": {@code @{argLine}} is substituted with the project property at
-     * run time, after other mojos (e.g. jacoco:prepare-agent) set it. The key must see the value the mojo
+     * run time, after other mojos (e.g. jacoco:prepare-agent) set it. The fingerprint must see the value the mojo
      * will see, not the literal placeholder.
      */
     static String lateReplace(ExecutionContext ctx, String s) {
@@ -160,10 +164,9 @@ final class ConfigurationHasher {
         String version = getter(value, "getVersion");
         String type = getter(value, "getType");
         String classifier = getter(value, "getClassifier");
-        String built = reactorContent(ctx, groupId, artifactId);
-        if (built != null) {
+        if (builtInReactor(ctx, groupId, artifactId)) {
             return groupId + ":" + artifactId + ":" + (type == null ? "jar" : type) + ":"
-                    + (classifier == null ? "" : classifier) + " " + built;
+                    + (classifier == null ? "" : classifier) + " " + BUILT_IN_REACTOR;
         }
         if (version == null || version.isBlank()) {
             version = managedVersion(ctx, groupId, artifactId);
@@ -199,10 +202,9 @@ final class ConfigurationHasher {
         String groupId = fields.get("groupId");
         String artifactId = fields.get("artifactId");
         String version = fields.get("version");
-        String built = reactorContent(ctx, groupId, artifactId);
-        if (built != null) {
+        if (builtInReactor(ctx, groupId, artifactId)) {
             fields.remove("version");
-            fields.put("content", built);
+            fields.put("reactor", BUILT_IN_REACTOR);
             return fields.toString();
         }
         if (version == null || version.isBlank() || "null".equals(version)) {
@@ -219,40 +221,22 @@ final class ConfigurationHasher {
         return fields.toString();
     }
 
-    /**
-     * A project of this build named by coordinates in configuration (an annotation processor, a
-     * build-tools module): its version says nothing about its content, which counts instead. Null for
-     * anything else.
-     */
-    static String reactorContent(ExecutionContext ctx, String groupId, String artifactId) throws NotCacheableException {
-        java.nio.file.Path artifact = reactorArtifact(ctx.session(), groupId, artifactId);
-        if (artifact == null) {
-            return null;
-        }
-        if (!java.nio.file.Files.exists(artifact)) {
-            throw new NotCacheableException("artifact " + groupId + ":" + artifactId
-                    + " is built in this reactor but not yet: its content is unknown");
-        }
-        return "built in this reactor, content " + dev.frontseat.mojoio.cache.FileTrees.hash(artifact);
-    }
+    private static final String BUILT_IN_REACTOR = "built in this reactor";
 
     /**
-     * The main artifact (a jar, or classes directory before packaging) of the reactor project
-     * {@code groupId:artifactId}; a non-existent path if it has none yet; {@code null} if no project of
-     * this build has these coordinates.
+     * Whether a project of this build has these coordinates (an annotation processor, a build-tools module
+     * named in configuration): its version says nothing about its content.
      */
-    static java.nio.file.Path reactorArtifact(org.apache.maven.execution.MavenSession session, String groupId,
-                                              String artifactId) {
-        if (session == null || groupId == null || artifactId == null) {
-            return null;
+    private static boolean builtInReactor(ExecutionContext ctx, String groupId, String artifactId) {
+        if (ctx.session() == null || groupId == null || artifactId == null) {
+            return false;
         }
-        for (org.apache.maven.project.MavenProject p : session.getAllProjects()) {
+        for (org.apache.maven.project.MavenProject p : ctx.session().getAllProjects()) {
             if (p.getGroupId().equals(groupId) && p.getArtifactId().equals(artifactId)) {
-                java.io.File f = p.getArtifact() == null ? null : p.getArtifact().getFile();
-                return f == null ? java.nio.file.Path.of(p.getBuild().getDirectory(), "missing-artifact") : f.toPath();
+                return true;
             }
         }
-        return null;
+        return false;
     }
 
     private static String managedVersion(ExecutionContext ctx, String groupId, String artifactId) {

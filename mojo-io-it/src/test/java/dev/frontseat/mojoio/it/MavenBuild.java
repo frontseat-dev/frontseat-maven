@@ -11,8 +11,6 @@ import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 /**
@@ -22,27 +20,23 @@ import java.util.stream.Stream;
  */
 final class MavenBuild {
 
-    private static final Pattern FRONTSEAT_LINE =
-            Pattern.compile("\\[mojo-io] (HIT|MISS|SKIP) +(\\S+) \\((\\S+)\\) @ ([^\\s:]+)");
-
     private final Path projectDir;
-    private final Path cacheDir;
 
-    private MavenBuild(Path projectDir, Path cacheDir) {
+    private MavenBuild(Path projectDir) {
         this.projectDir = projectDir;
-        this.cacheDir = cacheDir;
     }
 
     /** Copies {@code src/it/projects/<name>} to {@code target/it/<testName>/<checkout>}. */
-    static MavenBuild checkout(String project, String testName, String checkout, Path cacheDir) {
+    static MavenBuild checkout(String project, String testName, String checkout) {
         Path source = Path.of(System.getProperty("mojoio.it.projects")).resolve(project);
         Path target = Path.of(System.getProperty("mojoio.it.work")).resolve(testName).resolve(checkout);
         copyTree(source, target, false);
-        return new MavenBuild(target, cacheDir);
+        return new MavenBuild(target);
     }
 
-    static Path cacheDir(String testName) {
-        Path dir = Path.of(System.getProperty("mojoio.it.work")).resolve(testName).resolve("cache");
+    /** An empty {@code target/it/<testName>/<name>}, e.g. for a build system's cache. */
+    static Path emptyDir(String testName, String name) {
+        Path dir = Path.of(System.getProperty("mojoio.it.work")).resolve(testName).resolve(name);
         deleteTree(dir);
         return dir;
     }
@@ -78,7 +72,7 @@ final class MavenBuild {
 
     /** The same Maven, run in {@code dir} instead (a build system's sandbox). */
     MavenBuild at(Path dir) {
-        return new MavenBuild(dir, cacheDir);
+        return new MavenBuild(dir);
     }
 
     Result run(String... goals) {
@@ -102,7 +96,6 @@ final class MavenBuild {
         cmd.add("-B");
         cmd.add("-V"); // print the Maven version, so logs show which Maven line was exercised
         cmd.add("-Dmaven.ext.class.path=" + System.getProperty("mojoio.ext.classpath"));
-        cmd.add("-Dmojoio.cache.dir=" + cacheDir);
         String localRepo = System.getProperty("mojoio.it.localRepo");
         if (localRepo != null && !localRepo.isBlank()) {
             cmd.add("-Dmaven.repo.local=" + localRepo);
@@ -134,32 +127,7 @@ final class MavenBuild {
         }
     }
 
-    record Event(String outcome, String goal, String executionId, String module) {}
-
-    record Result(int exitCode, String log) {
-
-        List<Event> events() {
-            List<Event> events = new ArrayList<>();
-            Matcher m = FRONTSEAT_LINE.matcher(log);
-            while (m.find()) {
-                events.add(new Event(m.group(1), m.group(2), m.group(3), m.group(4)));
-            }
-            return events;
-        }
-
-        /** Outcome for {@code goal} in {@code module}, e.g. {@code HIT}; {@code null} if it never ran. */
-        String outcome(String module, String goal) {
-            return events().stream()
-                    .filter(e -> e.module().equals(module) && e.goal().equals(goal))
-                    .map(Event::outcome)
-                    .reduce((a, b) -> b)
-                    .orElse(null);
-        }
-
-        long count(String outcome) {
-            return events().stream().filter(e -> e.outcome().equals(outcome)).count();
-        }
-    }
+    record Result(int exitCode, String log) {}
 
     private static void copyTree(Path source, Path target, boolean includeTarget) {
         deleteTree(target);

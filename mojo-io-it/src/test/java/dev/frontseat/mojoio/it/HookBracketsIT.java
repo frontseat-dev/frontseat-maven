@@ -20,7 +20,7 @@ class HookBracketsIT {
 
     @Test
     void graphGroupsAPhaseWithItsHooks() throws Exception {
-        MavenBuild build = MavenBuild.checkout("it-hooks", "hooks-graph", "checkout", MavenBuild.cacheDir("hooks-graph"));
+        MavenBuild build = MavenBuild.checkout("it-hooks", "hooks-graph", "checkout");
         build.run("verify", "-Dmojoio.graph.output=graph.json");
         JsonNode project = new ObjectMapper().readTree(build.dir().resolve("graph.json").toFile()).get("projects").get(0);
         List<String> bracket = new ArrayList<>();
@@ -37,10 +37,9 @@ class HookBracketsIT {
 
     @Test
     void buildSystemRunsTheBracketAsOneTask() throws Exception {
-        Path cache = MavenBuild.cacheDir("hooks-run");
-        MavenBuild build = MavenBuild.checkout("it-hooks", "hooks-run", "checkout", cache);
+        MavenBuild build = MavenBuild.checkout("it-hooks", "hooks-run", "checkout");
         List<ReferenceBuildSystem.Outcome> outcomes =
-                new ReferenceBuildSystem(build, MavenBuild.cacheDir("hooks-run-bs")).build("verify");
+                new ReferenceBuildSystem(build, MavenBuild.emptyDir("hooks-run", "bs")).build("verify");
         assertTrue(outcomes.stream().anyMatch(o -> o.task().endsWith(":integration-test")), outcomes.toString());
         assertTrue(Files.isRegularFile(build.dir().resolve("target/failsafe-reports/TEST-sample.hooks.ServerIT.xml")));
 
@@ -49,9 +48,9 @@ class HookBracketsIT {
         if (MavenBuild.daemon()) {
             return;
         }
-        MavenBuild split = MavenBuild.checkout("it-hooks", "hooks-run", "split", cache);
+        MavenBuild split = MavenBuild.checkout("it-hooks", "hooks-run", "split");
         ReferenceBuildSystem.TaskFailed failed = assertThrows(ReferenceBuildSystem.TaskFailed.class,
-                () -> new ReferenceBuildSystem(split, MavenBuild.cacheDir("hooks-split-bs"), false).build("verify"));
+                () -> new ReferenceBuildSystem(split, MavenBuild.emptyDir("hooks-run", "split-bs"), false).build("verify"));
         assertTrue(failed.task.endsWith(":integration-test") || failed.task.endsWith(":verify"), failed.task);
     }
 }

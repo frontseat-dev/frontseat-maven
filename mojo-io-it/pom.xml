@@ -14,7 +14,8 @@
   <name>mojo-io :: Integration Tests</name>
   <description>
     Forks real Maven builds of the sample projects under src/it/projects with the extension loaded,
-    and asserts on cache hits, restored outputs and restored project state.
+    and asserts on the exported task graph, recorded and replayed project state, and builds run task by
+    task by a reference build system.
   </description>
 
   <properties>
@@ -49,7 +50,7 @@
   <build>
     <plugins>
       <plugin>
-        <!-- Exposes the extension's runtime jars (extension + cache core) as ${mojoio.ext.classpath}. -->
+        <!-- Exposes the extension's runtime jars (extension + spec) as ${mojoio.ext.classpath}. -->
         <artifactId>maven-dependency-plugin</artifactId>
         <executions>
           <execution>

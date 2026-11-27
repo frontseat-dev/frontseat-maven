@@ -11,25 +11,24 @@ import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
 
 /**
- * mojo-io as the contract for an external build system's cache (the Nx use case): the reference build
- * system caches Maven tasks with its own hashing and storage, using only the task graph, state files
- * and single-task invocations. mojo-io's own cache is never used.
+ * mojo-io as the contract for a build system's cache and sandbox (the Nx use case): the reference build
+ * system caches Maven tasks with its own hashing and storage and runs each in a fresh sandbox, using only
+ * the task graph, state files and single-task invocations.
  */
 class ExternalBuildSystemIT {
 
     @Test
     void externalBuildSystemCachesMavenTasksFromTheGraphAlone() throws Exception {
-        Path mojoioCache = MavenBuild.cacheDir("external");
-        Path buildSystemCache = MavenBuild.cacheDir("external-bs");
+        Path buildSystemCache = MavenBuild.emptyDir("external", "bs");
 
         // Cold: every task runs.
-        MavenBuild a = MavenBuild.checkout("basic-multimodule", "external", "a", mojoioCache);
+        MavenBuild a = MavenBuild.checkout("basic-multimodule", "external", "a");
         List<ReferenceBuildSystem.Outcome> cold = new ReferenceBuildSystem(a, buildSystemCache).build("test");
         assertTrue(cold.size() >= 13, cold.toString());
         assertTrue(cold.stream().noneMatch(ReferenceBuildSystem.Outcome::hit), cold.toString());
 
         // Fresh checkout elsewhere: everything comes from the build system's cache, nothing runs.
-        MavenBuild b = MavenBuild.checkout("basic-multimodule", "external", "b", mojoioCache);
+        MavenBuild b = MavenBuild.checkout("basic-multimodule", "external", "b");
         ReferenceBuildSystem bs = new ReferenceBuildSystem(b, buildSystemCache);
         List<ReferenceBuildSystem.Outcome> warm = bs.build("test");
         assertTrue(warm.stream().allMatch(ReferenceBuildSystem.Outcome::hit), warm.toString());
@@ -83,9 +82,8 @@ class ExternalBuildSystemIT {
      */
     @Test
     void stagesJoinPhasesAndKeepPhaseLinks() throws Exception {
-        Path buildSystemCache = MavenBuild.cacheDir("external-stage-bs");
-        Path mojoioCache = MavenBuild.cacheDir("external-stage-unused");
-        MavenBuild a = MavenBuild.checkout("basic-multimodule", "external-stage", "a", mojoioCache);
+        Path buildSystemCache = MavenBuild.emptyDir("external-stage", "bs");
+        MavenBuild a = MavenBuild.checkout("basic-multimodule", "external-stage", "a");
         List<ReferenceBuildSystem.Outcome> cold = new ReferenceBuildSystem(a, buildSystemCache, "stage").build("verify");
         List<String> names = cold.stream().map(ReferenceBuildSystem.Outcome::task).collect(Collectors.toList());
         for (String project : List.of("lib-core", "app")) {
@@ -95,7 +93,7 @@ class ExternalBuildSystemIT {
                     .collect(Collectors.toList()), names.toString());
         }
 
-        MavenBuild b = MavenBuild.checkout("basic-multimodule", "external-stage", "b", mojoioCache);
+        MavenBuild b = MavenBuild.checkout("basic-multimodule", "external-stage", "b");
         ReferenceBuildSystem bs = new ReferenceBuildSystem(b, buildSystemCache, "stage");
         assertTrue(bs.build("verify").stream().allMatch(ReferenceBuildSystem.Outcome::hit));
         assertTrue(Files.isRegularFile(b.dir().resolve("app/target/app-1.0.0-SNAPSHOT.jar")));
@@ -124,8 +122,8 @@ class ExternalBuildSystemIT {
      */
     @Test
     void tasksWaitForWhatTheirMojosResolveAndForAttachedArtifacts() throws Exception {
-        Path buildSystemCache = MavenBuild.cacheDir("ordering-bs");
-        MavenBuild build = MavenBuild.checkout("task-ordering", "ordering", "checkout", MavenBuild.cacheDir("ordering-unused"));
+        Path buildSystemCache = MavenBuild.emptyDir("ordering", "bs");
+        MavenBuild build = MavenBuild.checkout("task-ordering", "ordering", "checkout");
         build.run("verify", "-Dmojoio.graph.output=graph.json");
         com.fasterxml.jackson.databind.JsonNode graph = new com.fasterxml.jackson.databind.ObjectMapper()
                 .readTree(build.dir().resolve("graph.json").toFile());
@@ -183,28 +181,23 @@ class ExternalBuildSystemIT {
     }
 
     /**
-     * A plugin dependency built in the same reactor (a build-tools module) is an input of the mojo by
-     * content, not just by coordinates. And resolving dependencies for a cache key must not narrow
-     * what Maven resolved for the build: a mojo without a declaration, after a declared one that needs
-     * less, still gets the whole test classpath.
+     * A plugin dependency built in the same reactor (a build-tools module) is loaded as a packaged
+     * artifact: the task that runs the plugin waits for that module's packaging, so a changed tool
+     * re-runs it. A mojo without a declaration still gets the project's whole test classpath.
      */
     @Test
-    void reactorPluginDependenciesAndDependencyResolutionStayAsInPlainMaven() throws Exception {
-        Path cache = MavenBuild.cacheDir("plugin-deps");
-        MavenBuild build = MavenBuild.checkout("task-ordering", "plugin-deps", "checkout", cache);
-        build.run("verify");
+    void reactorPluginDependenciesReachTheTasksThatLoadThem() throws Exception {
+        MavenBuild build = MavenBuild.checkout("task-ordering", "plugin-deps", "checkout");
+        ReferenceBuildSystem bs = new ReferenceBuildSystem(build, MavenBuild.emptyDir("plugin-deps", "bs"), "stage");
+        bs.build("verify");
         assertEquals("tool v1", Files.readString(build.dir().resolve("b/target/tool-copy.txt")).trim());
         String afterCompile = Files.readString(build.dir().resolve("b/target/test-classpath-after-compile.txt"));
         assertTrue(afterCompile.contains("junit-jupiter"), "test-scope dependencies after a compile-scope mojo: " + afterCompile);
 
-        MavenBuild.Result warm = build.run("clean", "verify");
-        assertEquals("HIT", warm.outcome("b", "antrun:run"), warm.log());
-        assertTrue(Files.readString(build.dir().resolve("b/target/test-classpath-after-compile.txt")).contains("junit-jupiter"),
-                "the same when the compile mojo was restored");
-
         Files.writeString(build.dir().resolve("tools/src/main/resources/tool.txt"), "tool v2\n");
-        MavenBuild.Result changed = build.run("verify");
-        assertEquals("MISS", changed.outcome("b", "antrun:run"), changed.log());
+        List<String> missed = bs.build("verify").stream().filter(o -> !o.hit())
+                .map(ReferenceBuildSystem.Outcome::task).collect(Collectors.toList());
+        assertTrue(missed.contains("com.example.samples:b:validate"), missed.toString());
         assertEquals("tool v2", Files.readString(build.dir().resolve("b/target/tool-copy.txt")).trim());
     }
 }

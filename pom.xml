@@ -10,7 +10,7 @@
   <packaging>pom</packaging>
 
   <name>mojo-io</name>
-  <description>Mojo-level build cache for Maven 3.9+, delivered as a core extension.</description>
+  <description>Mojo-level task graph and project-state replay for Maven 3.9+, for build systems that cache and sandbox Maven tasks.</description>
 
   <url>https://github.com/frontseat-dev/frontseat-maven</url>
 
@@ -36,7 +36,6 @@
 
   <modules>
     <module>mojo-io-spec</module>
-    <module>mojo-io-cache</module>
     <module>mojo-io-maven-extension</module>
     <module>mojo-io-it</module>
   </modules>
@@ -56,11 +55,6 @@
       <dependency>
         <groupId>dev.frontseat.mojoio</groupId>
         <artifactId>mojo-io-spec</artifactId>
-        <version>${project.version}</version>
-      </dependency>
-      <dependency>
-        <groupId>dev.frontseat.mojoio</groupId>
-        <artifactId>mojo-io-cache</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>

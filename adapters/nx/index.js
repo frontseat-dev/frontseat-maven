@@ -21,8 +21,6 @@
  *   granularity:  target size: "phase", "stage" (default: compile, test, package, verify) or "module".
  *                 Every target is one Maven invocation (about 0.1s overhead through mvnd), so fewer,
  *                 bigger targets make cold builds faster; smaller ones cache more finely.
- *   innerCache:   keep mojo-io's own local cache on inside a target (default: false). When a target
- *                 re-runs, its mojos with unchanged inputs are restored instead of run.
  *   args:         extra Maven arguments for every target (default: [])
  */
 const { createHash } = require('crypto');
@@ -31,7 +29,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
-const CACHE_VERSION = 4;
+const CACHE_VERSION = 5;
 
 /** Maven 3 default lifecycle (task names are canonical Maven 3 phases on Maven 3 and 4 alike). */
 const DEFAULT_LIFECYCLE = ['validate', 'initialize', 'generate-sources', 'process-sources', 'generate-resources',
@@ -251,7 +249,7 @@ function targetsFor(project, graph, names, options) {
     // added as dependencies while loading, as Eclipse Tycho does).
     const projectList = [project.id, ...(project.reactorReferences || [])].join(',');
     const invocation = [maven, ...baseArgs(maven), '-B', '--no-transfer-progress', '-pl', projectList, '-am',
-      `-Dmojoio.only=${project.id}`, ...(options && options.innerCache ? [] : ['-Dmojoio.cache.enabled=false']),
+      `-Dmojoio.only=${project.id}`,
       // Not read by Maven: makes Nx's hash cover what it cannot hash itself (evaluated configuration,
       // plugin versions, JDK, external dependencies).
       `-Dmojoio.fingerprint=${fingerprint}`,
