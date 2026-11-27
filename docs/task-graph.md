@@ -1,7 +1,7 @@
 # Task graph format (`mojo-io-task-graph`, version 1)
 
-A tool-agnostic description of a Maven build as tasks, for any orchestrator or cache (Nx, Bazel,
-Frontseat, CI systems, Maven itself). The schema is
+A tool-agnostic description of a Maven build as tasks, for build systems that cache tasks and run
+each one in a sandbox (Nx, REAPI grids, Bazel-like tools). The schema is
 [`task-graph-1.schema.json`](../mojo-io-spec/src/main/resources/dev/frontseat/mojoio/spec/task-graph-1.schema.json).
 
 ## Producing it
@@ -38,7 +38,6 @@ the goals you want described; `verify` covers the default lifecycle up to packag
       "runTogether": null,                 // or e.g. "integration-test" for a phase and its hooks
       "fingerprint": "9f2c…",              // config + plugin + JDK + values; null if not cacheable
       "declaredBy": "built-in",            // or "plugin …", "project .mvn/plugin-io/x.xml", or null
-      "stamping": "carry",                 // "exact": the version is an input; "carry": only copied (docs/versioning.md)
       "cacheable": true, "reason": null,
       "inputs": [
         { "name": "compileSourceRoots", "kind": "files", "paths": ["{projectRoot}/src/main/java"], "includes": [], "excludes": [] },
@@ -68,8 +67,7 @@ Consumers substitute their own values.
 | `value` | A value as known at export time, e.g. a property the mojo reads. |
 
 Besides the declared inputs, a conservative consumer also hashes `poms`: they hold the plugin
-configuration, which the graph doesn't evaluate. It should also hash the JDK, which mojo-io's own
-cache keys always include.
+configuration, which the graph doesn't evaluate. The JDK is part of every fingerprint.
 
 ### Projects a task needs beyond `-am`
 
@@ -98,14 +96,32 @@ its `reactorReferences`, and hashes them.
 
 ### Outputs and state
 
-Restore `outputs` **and** `stateFile` together. The state file records what the execution changed in
-the in-memory project; the extension replays it in later builds (see [state format](state-format.md)).
-Without it, a restored `target/` can be unusable: for example, a downstream module can no longer
-resolve its upstream module, and JaCoCo's agent isn't attached.
+Cache and restore `outputs` **and** `stateFile` together. The state file records what the execution
+changed in the in-memory project; the extension replays it in the tasks that come after it (see
+[state format](state-format.md)). Without it, restored outputs can be unusable: for example, a
+downstream module can no longer resolve its upstream module, and JaCoCo's agent isn't attached.
+
+An output with `"observed": true` (tests, agents) is known only after the run: it is whatever the
+execution writes under `path` (the build directory) matching `includes`/`excludes`, minus the
+execution's `ignoredWrites`. A build system takes those files from the task's sandbox.
 
 ## Caching Maven tasks in a build system
 
-What a build system (Nx, Bazel, Turborepo, a CI cache, …) needs, all in the graph:
+mojo-io neither caches nor checks what a mojo writes: the build system does both. It owns three
+things:
+
+- **A fresh input root per task.** Each task runs in a sandbox that holds only the task's declared
+  inputs (with `poms`, `loadFiles` and `.mvn/`) and the outputs of the tasks in its `dependsOn`,
+  transitively. Nothing an earlier build left behind is there, so every state file in it is one to
+  replay.
+- **The write check.** After a task, the build system compares the sandbox with the task's declared
+  outputs: a file written outside the outputs, the observed outputs, the `ignoredWrites` and the
+  state files is an undeclared write, and the task's result must not be cached. Maven itself writes
+  too: Maven 4's consumer poms (`consumer-*.pom`, already in every execution's `ignoredWrites`) and its
+  project-local repository under `.mvn/target/`.
+- **The cache.** Keyed by its own hash of the task, holding the task's outputs and state files.
+
+All it needs is in the graph:
 
 1. **Tasks.** Use each project's ready-made `tasks`. Each one groups executions by the chosen
    [granularity](#granularity) (by default a stage: compile, test, package, verify) and lists its
@@ -120,25 +136,27 @@ What a build system (Nx, Bazel, Turborepo, a CI cache, …) needs, all in the gr
    - `poms` and `externalDependencies`;
    - the hashes of the tasks in the task's `dependsOn`, which also cover the classpath.
    In Nx, put the fingerprints into the task's options, which Nx hashes.
-3. **Cache.** Store each member's `outputs` and its `stateFile`. An output with `"observed": true` (tests,
-   agents) is known only after the run: store the files listed as `output` records in the state file.
-   On a hit, copy everything back.
-4. **Run one task.** Run
-   `mvn -pl <id> -am -Dmojoio.only=<id> -Dmojoio.prerequisites=false -Dmojoio.cache.enabled=false <invocation>...`.
-   - `-am` puts the upstream projects in the reactor, so their restored outputs resolve.
+3. **Cache.** Store each member's `outputs` and its `stateFile`, and for observed outputs what the task
+   wrote there. On a hit, copy everything back.
+4. **Run one task.** In the task's sandbox, run
+   `mvn -pl <id>[,<reactorReferences>] -am -Dmojoio.only=<id> <invocation>...`.
+   - `-am` puts the upstream projects in the reactor, so their outputs resolve.
    - `mojoio.only` makes sure only this project's mojos run. If the build ends without failing and
-     without building a selected project, the extension fails it: an empty result must never be
-     cached as a success. The other projects' state is replayed
-     only as far as the task's `dependsOn` reach, so leftovers of later tasks in the workspace (an
-     old jar) are never picked up.
-   - The extension replays the recorded state of everything that doesn't run: artifact files,
-     attachments, generated source roots, properties like JaCoCo's `argLine`.
+     without building a selected project, the extension fails it (and leaves
+     `target/mojo-io/not-built` in that project): an empty result must never be cached as a success.
+   - The extension replays the recorded state of everything that doesn't run: every complete state
+     file of the upstream projects, and the project's own state files of executions outside the
+     invocation. That restores artifact files, attachments, generated source roots and properties
+     like JaCoCo's `argLine`.
 
-Fingerprints include stamp values such as the project version, because a build system restores outputs
-byte for byte and can't rewrite the version inside them.
+Fingerprints include stamp values such as the project version as they are, because a build system
+restores outputs byte for byte: a version bump changes the fingerprint of every execution whose
+configuration or value inputs contain the version (a jar's name, a filtered resource), and those
+tasks re-run.
 
 `ExternalBuildSystemIT` does exactly this, with a small reference implementation
-(`ReferenceBuildSystem`) and mojo-io's own cache switched off, at `phase` and at `stage` granularity. A fresh checkout is restored entirely from
+(`ReferenceBuildSystem`) that runs each task in a sandbox and fails a task that writes undeclared
+files, at `phase` and at `stage` granularity. A fresh checkout is restored entirely from
 the build system's cache, and editing one test re-runs exactly that project's `test-compile` and `test` (or its `test` stage).
 `HookBracketsIT` shows that splitting a hook bracket breaks the integration tests.
 
@@ -235,8 +253,11 @@ depends on their package tasks.
 `cacheable: false` with a `reason` means one of:
 - no declaration exists (see [plugin-io](plugin-io.md));
 - the declaration says the mojo can't be cached;
-- the mojo is an aggregator, or forks an execution that isn't declared (a mojo that forks declared
-  goals is one execution in the graph, with their inputs and outputs);
+- the mojo is an aggregator without a `reactorModels` input, or forks an execution that isn't
+  declared (a mojo that forks declared goals is one execution in the graph, with their inputs and
+  outputs);
+- its configuration names an artifact by a SNAPSHOT version or a range, which can change under the
+  same name;
 - describing it failed.
 
 A consumer should always run such executions.

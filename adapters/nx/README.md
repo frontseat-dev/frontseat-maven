@@ -35,9 +35,13 @@ invocations. It's an *adapter*: nothing in mojo-io knows about Nx.
 
 ## Limits
 
+- **Targets run in the workspace, not in a fresh input root.** mojo-io expects each task to see only
+  its declared inputs and the outputs of the tasks it depends on, and replays every state file it
+  finds. In a workspace where a later target of an upstream project ran before (`package` left a jar
+  and its state next to the classes), an earlier target can pick up that state. Run targets in Nx's
+  sandbox where available, or start from a clean `target/` after changing an upstream project.
 - **External dependencies count by coordinates.** A SNAPSHOT dependency from outside the workspace
-  that was re-resolved under the same version doesn't change a target's hash. Turn on `innerCache` if
-  that matters: mojo-io's own keys hash the resolved files.
+  that was re-resolved under the same version doesn't change a target's hash.
 - **The graph is cached** on the POMs, `.mvn/` (extensions, `maven.config`, `jvm.config`, `plugin-io/`),
   the user's `settings.xml`, the JDK and the plugin options. Environment variables or system
   properties that POMs read aren't part of that: after changing one, run `nx reset`.
@@ -60,7 +64,6 @@ Options (`plugins[].options`):
 | `maven` | `$MOJOIO_MAVEN`, else `mvnd` if on `PATH`, else `mvn` | Maven executable for graph export and targets. Use mvnd: it saves JVM and Maven startup on every target. |
 | `goal` | `verify` | Lifecycle goal the graph is computed for. |
 | `granularity` | `stage` | Target size: `phase`, `stage` or `module`. Every target is one Maven invocation, so bigger targets make cold builds faster (20 modules cold: 32s, 20s, 17s; raw Maven 14s) and smaller ones cache more finely. |
-| `innerCache` | `false` | Keep mojo-io's own local cache on inside a target. When a target re-runs, its mojos with unchanged inputs are restored instead of run. Useful with `module`. |
 | `args` | `[]` | Extra Maven arguments for every target. |
 
 ## Proof: `e2e/run.mjs`
@@ -83,4 +86,4 @@ checkouts, and checks:
    `app`'s compile and test stay cached. Outputs are identical to raw Maven on the changed sources.
 5. **Speed on a 20-module reactor:** raw mvn and mvnd against Nx cold at each granularity (outputs
    checked against raw Maven each time), Nx warm (fresh checkout with a shared cache), Nx after a
-   change, and `module` with the inner cache. Results are in [docs/performance.md](../../docs/performance.md).
+   change. Results are in [docs/performance.md](../../docs/performance.md).

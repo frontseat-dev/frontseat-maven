@@ -5,13 +5,14 @@ Mojos change the in-memory Maven project as well as files. For example:
 - JaCoCo sets `argLine`.
 
 Later mojos, and downstream modules, depend on those changes, but they're lost whenever a mojo
-doesn't run because a cache restored its outputs.
+doesn't run in the same Maven process: when a build system runs a project's tasks one at a time, or
+restores a task's outputs from its cache.
 
 The extension therefore records each execution's changes in
 `target/mojo-io/state/<artifactId>-<goal>-<executionId>.state`, next to the outputs. At the start of
 each project's build, it replays the state files of executions that aren't going to run this time.
-Any tool that restores `target/` therefore restores the state too, with nothing tool-specific
-involved.
+A build system that caches and restores a task's outputs together with its state files therefore
+restores the state too, with nothing tool-specific involved.
 
 ## File format
 
@@ -35,33 +36,24 @@ change property argLine -javaagent%3A%40%40M2REPO%40%40%2F...%3Ddestfile%3D%40%4
 | `change attachedArtifact <type>:<classifier> <path>` | Attached an artifact (e.g. `test-jar:tests`, `java-source:sources`). |
 | `change systemProperty <name> <value>` / `change systemPropertyRemoved <name> <_>` | Set or cleared a JVM system property (a hook handing data to later mojos). JVM/runtime properties are not recorded. |
 | `change contextValue <name> <value>` | Set a text value in the project context (`MavenProject#setContextValue`). A name `@<class>#<key>` is a value in the context of the object of that class kept there: Eclipse Tycho's `ReactorProject`, through which its mojos hand values to later ones (the declarative services header). Other context values are not recorded. |
-| `change output <_> <path>` | Informational, not replayed: a file the execution wrote that an `<observed/>` output covers. External caches store exactly these files. |
-| `incomplete <reason>` | The execution made changes this format can't express (removed source roots, changed resources, replaced attachments). Don't replay it; treat the execution as not restorable. |
+| `incomplete <reason>` | The execution made changes this format can't express (removed source roots, changed resources, replaced attachments). The extension doesn't replay it and logs why; a build system should not cache the task. |
 
 Paths in values use the tokens `@@BASEDIR@@` (the module), `@@ROOT@@` (the multi-module root) and
 `@@M2REPO@@` (the local repository), so a state file stays valid in another checkout or on another
-machine. Stamp values such as the project version appear as `@@STAMP:<name>@@` (e.g. the jar plugin's
-`artifactFile`), so the state follows a version bump too ([versioning](versioning.md)). If a value refers to a local-repository file that's missing (for example the JaCoCo agent
-jar), the record isn't replayed.
+machine. If a value refers to a local-repository file that's missing (for example the JaCoCo agent
+jar), the state file isn't replayed, and the build log says which file is missing.
 
 ## Replay rules
 
-- **When:** at most once per project per build, before its first execution.
-- **What:** the state of every recorded execution that isn't in this build's plan for the project.
-  Executions in the plan run (or are restored by the built-in cache) and set their own state.
-- **Other projects with `mojoio.only`:** the projects that aren't selected run nothing. Their state is
-  replayed when a selected project starts, and only **through the phase that project's mojos need them
-  at**, by the same rules as the task graph's `dependsOn`:
-  - compiling or testing needs a dependency through `ready` (its compiled classes);
-  - packaging needs runtime dependencies through `package`;
-  - a dependency on an attached artifact or an archive (a classifier, `test-jar`, `war`, …) needs
-    `package`.
-
-  State beyond that isn't trusted. In a build system's workspace it can be left over from an earlier
-  build (an old jar next to freshly restored classes), or be rewritten at that moment by a task running
-  in parallel. Projects the selected one doesn't depend on (its parents) are replayed fully.
-- **Not from later phases:** state recorded for a phase after the last phase of this invocation isn't
-  replayed (compiling doesn't replay what packaging recorded). In a build system's workspace that
-  state is typically left over from an earlier build.
+- **When:** before a project's executions run, at most once per execution and build.
+- **Own state:** the state of every recorded execution of the project that isn't in this build's
+  plan for it and hasn't run in this build. Executions in the plan run and record their own state.
+- **Upstream state with `mojoio.only`:** the projects that aren't selected run nothing. When a selected
+  project starts, every complete state file of its upstream projects is replayed. This relies on the
+  build system's sandbox: it holds exactly the outputs of the tasks the task depends on, so there is no
+  state of a later or an earlier build to leave out.
 - **Order:** files are applied in file-name order. The changes of different executions are expected
   to be independent.
+- **Maven 4's concurrent builder** calls the extension once per lifecycle step. An execution whose
+  state was replayed in an earlier step and that runs in a later one keeps those changes in its
+  recorded state if they still hold after it ran.
