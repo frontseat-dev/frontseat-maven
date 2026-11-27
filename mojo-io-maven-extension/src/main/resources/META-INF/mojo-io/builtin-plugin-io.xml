@@ -57,7 +57,7 @@
              depend on the previous run's outputs. -->
         <classpath parameter="compilePath" excludeParameter="outputDirectory"/>
         <!-- javac finds annotation processors through the classpath, its own output included: the
-             service files resources copied there (found by the audit, -Dmojoio.audit). -->
+             service files resources copied there. -->
         <files expression="${project.build.outputDirectory}/META-INF/services"/>
       </inputs>
       <outputs>

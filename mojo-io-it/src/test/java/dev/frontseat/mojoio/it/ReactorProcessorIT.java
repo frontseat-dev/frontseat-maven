@@ -9,7 +9,7 @@ import org.junit.jupiter.api.Test;
 
 /**
  * An annotation processor built in the same reactor, named in configuration with a release version:
- * it counts by content, not by its version (found by the audit, -Dmojoio.audit, on mapstruct-examples).
+ * it counts by content, not by its version (as in mapstruct-examples).
  */
 class ReactorProcessorIT {
 
@@ -27,9 +27,5 @@ class ReactorProcessorIT {
         assertEquals("MISS", changed.outcome("app", "compiler:compile"), changed.log());
         assertTrue(Files.readString(build.dir().resolve("app/target/generated-sources/annotations/sample/app/Info.java"))
                 .contains("processor v2"));
-
-        // The audit sees the processor jar read and counts it as declared.
-        MavenBuild.Result audit = build.run("clean", "package", "-Dmojoio.audit=fail");
-        assertTrue(audit.log().contains("0 with undeclared files or processes"), audit.log());
     }
 }

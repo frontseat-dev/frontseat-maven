@@ -21,23 +21,17 @@ public class MojoIoLifecycleParticipant extends AbstractMavenLifecycleParticipan
     static final String NOT_BUILT_MESSAGE = "[mojo-io] NOT BUILT";
 
     private final TaskGraphCollector graph;
-    private final Audit audit;
     private final MojoIoExecutionStrategy strategy;
 
     @Inject
-    public MojoIoLifecycleParticipant(TaskGraphCollector graph, MojoIoExecutionStrategy strategy, Audit audit) {
+    public MojoIoLifecycleParticipant(TaskGraphCollector graph, MojoIoExecutionStrategy strategy) {
         this.graph = graph;
-        this.audit = audit;
         this.strategy = strategy;
     }
 
     @Override
     public void afterSessionEnd(MavenSession session) throws MavenExecutionException {
         StateFiles.reset();
-        String auditFailure = audit.finish(session);
-        if (auditFailure != null) {
-            throw new MavenExecutionException("[mojo-io] AUDIT " + auditFailure, (java.io.File) null);
-        }
         MojoIoConfig config = MojoIoConfig.from(session);
         if (!config.enabled()) {
             return;

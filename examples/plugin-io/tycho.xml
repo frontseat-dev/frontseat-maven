@@ -92,8 +92,7 @@
   </plugin>
 
   <plugin groupId="org.eclipse.tycho" artifactId="tycho-packaging-plugin">
-    <!-- Checks that the pom's version and id match the project's own metadata (found by the audit:
-         -Dmojoio.audit). -->
+    <!-- Checks that the pom's version and id match the project's own metadata. -->
     <mojo goal="validate-version">
       <inputs>
         <projectModel/>

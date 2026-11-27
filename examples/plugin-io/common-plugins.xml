@@ -144,7 +144,7 @@
   <plugin groupId="org.spdx" artifactId="spdx-maven-plugin">
     <mojo goal="createSPDX">
       <inputs>
-        <!-- It reads the models of the reactor projects it depends on too (found by the audit). -->
+        <!-- It reads the models of the reactor projects it depends on too. -->
         <reactorModels/>
         <projectFiles/>
         <testClasspath ownOutputs="false"/>
@@ -158,7 +158,7 @@
 
   <!-- Rewrites the project's jar in place, adding a module descriptor computed from the jar, the
        configuration and the dependencies, or from a module-info.java the configuration names
-       (module.moduleInfoFile; found by the audit, -Dmojoio.audit, on gson). Not covered: the
+       (module.moduleInfoFile, as in gson). Not covered: the
        moduleInfoFile of entries in a <modules> list. The jar as jar:jar left it is the input; the
        rewritten jar is the (observed) output. -->
   <plugin groupId="org.moditect" artifactId="moditect-maven-plugin">

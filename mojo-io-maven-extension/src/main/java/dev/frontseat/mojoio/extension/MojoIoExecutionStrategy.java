@@ -64,7 +64,6 @@ public class MojoIoExecutionStrategy implements MojosExecutionStrategy {
     private final PrerequisiteExpander prerequisites;
     private final TaskGraphCollector graph;
     private final org.apache.maven.project.MavenProjectHelper projectHelper;
-    private final Audit audit;
     /**
      * What replay applied, per build session, project id and execution identity (see
      * StateFiles#replayPending); a project id is present once it has been replayed. Keyed by session, not
@@ -179,9 +178,8 @@ public class MojoIoExecutionStrategy implements MojosExecutionStrategy {
     @Inject
     public MojoIoExecutionStrategy(DescriptorRegistry registry, DependencyResolution dependencyResolution,
                                    PrerequisiteExpander prerequisites, TaskGraphCollector graph,
-                                   org.apache.maven.project.MavenProjectHelper projectHelper, Audit audit) {
+                                   org.apache.maven.project.MavenProjectHelper projectHelper) {
         this.projectHelper = projectHelper;
-        this.audit = audit;
         this.registry = registry;
         this.dependencyResolution = dependencyResolution;
         this.prerequisites = prerequisites;
@@ -286,15 +284,7 @@ public class MojoIoExecutionStrategy implements MojosExecutionStrategy {
         // change would be attributed to this mojo, so they are only tracked in sequential builds.
         boolean trackSystemProperties = !session.isParallel();
         ProjectState before = ProjectState.capture(project, trackSystemProperties);
-        Audit.Window window = Audit.mode(session) == Audit.Mode.OFF ? null
-                : audit.begin(session, project, m, label, auditCoverage(m, session, project, ctx, descriptor));
-        try {
-            runner.run(m);
-        } finally {
-            if (window != null) {
-                audit.end(window);
-            }
-        }
+        runner.run(m);
         List<CacheEntry.StateRecord> state = null;
         String incomplete = null;
         try {
@@ -426,67 +416,6 @@ public class MojoIoExecutionStrategy implements MojosExecutionStrategy {
         if (deleted > 0) {
             LOG.debug(PREFIX + "cleaned {} declared output(s) of {}", deleted, label);
         }
-    }
-
-    /** What an audited execution declared, resolved as for its cache key. */
-    private Audit.Coverage auditCoverage(MojoExecution m, MavenSession session, MavenProject project,
-                                         ExecutionContext ctx, Optional<MojoCacheDescriptor> descriptor) {
-        if (descriptor.isEmpty()) {
-            return Audit.Coverage.undeclared();
-        }
-        MojoCacheDescriptor d = descriptor.get();
-        boolean cacheable = structuralReason(m, d) == null;
-        List<dev.frontseat.mojoio.extension.descriptor.ResolvedInput> inputs = new ArrayList<>();
-        String unresolved = null;
-        DependencyResolution.Saved dependencies = DependencyResolution.save(project);
-        try {
-            dependencyResolution.resolveFor(m, project, session);
-            for (dev.frontseat.mojoio.extension.descriptor.InputSpec spec : d.inputs()) {
-                try {
-                    inputs.addAll(spec.resolve(ctx));
-                } catch (NotCacheableException | RuntimeException e) {
-                    unresolved = e.getMessage();
-                    cacheable = false;
-                }
-            }
-        } catch (LifecycleExecutionException | RuntimeException e) {
-            unresolved = e.toString();
-            cacheable = false;
-        } finally {
-            dependencies.restore();
-        }
-        // Reactor projects named in the configuration count by content (see ConfigurationHasher).
-        List<java.nio.file.Path> configured = new ArrayList<>();
-        java.util.Set<String> reactorIds = new java.util.HashSet<>();
-        session.getAllProjects().forEach(p -> reactorIds.add(p.getGroupId() + ":" + p.getArtifactId()));
-        if (m.getConfiguration() != null) {
-            org.codehaus.plexus.util.xml.Xpp3Dom configuration = m.getConfiguration();
-            java.util.Set<String> named = new java.util.LinkedHashSet<>();
-            TaskGraphCollector.collectReferences(configuration, reactorIds, named);
-            for (String id : named) {
-                java.nio.file.Path artifact = ConfigurationHasher.reactorArtifact(session, id.split(":")[0], id.split(":")[1]);
-                if (artifact != null) {
-                    configured.add(artifact);
-                }
-            }
-        }
-        // The effective model stands for the pom files it comes from: the project's and its parents', or
-        // those of the whole reactor.
-        boolean projectModel = inputs.stream().anyMatch(i -> i.name().equals("projectModel"));
-        boolean reactorModels = inputs.stream().anyMatch(i -> i.name().equals("reactorModels"));
-        List<java.nio.file.Path> poms = new ArrayList<>();
-        if (projectModel || reactorModels) {
-            for (MavenProject p : reactorModels ? session.getAllProjects() : List.of(project)) {
-                for (MavenProject cur = p; cur != null && cur.getFile() != null; cur = cur.getParent()) {
-                    poms.add(cur.getFile().toPath().toAbsolutePath().normalize());
-                }
-            }
-            inputs.add(dev.frontseat.mojoio.extension.descriptor.ResolvedInput.files("poms", poms));
-        }
-        if (!configured.isEmpty()) {
-            inputs.add(dev.frontseat.mojoio.extension.descriptor.ResolvedInput.classpath("configuration", configured, null));
-        }
-        return new Audit.Coverage(inputs, resolvedOutputs(ctx, d), d.ignoredWrites(), d.source(), cacheable, unresolved);
     }
 
     /** The cache key, or {@code null} (with a log line) when the execution cannot be cached. */
