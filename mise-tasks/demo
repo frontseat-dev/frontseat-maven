@@ -3,7 +3,7 @@
 #MISE depends=["build"]
 #USAGE arg "[goals]..." help="Maven goals and flags (default: verify)" var=#true
 #USAGE flag "--maven4" help="Use Maven 4 instead of 3.9"
-#USAGE flag "--fresh" help="Start from a fresh copy of the sample (keeps the cache)"
+#USAGE flag "--fresh" help="Start from a fresh copy of the sample"
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -12,7 +12,6 @@ work="$root/target/demo/basic-multimodule"
 version="$(cd "$root" && mvn -q help:evaluate -Dexpression=project.version -DforceStdout 2>/dev/null)"
 ext="$root/mojo-io-maven-extension/target/mojo-io-maven-extension-$version.jar"
 ext="$ext:$root/mojo-io-spec/target/mojo-io-spec-$version.jar"
-ext="$ext:$root/mojo-io-cache/target/mojo-io-cache-$version.jar"
 
 if [[ "${usage_fresh:-false}" == "true" || ! -d "$work" ]]; then
   rm -rf "$work" && mkdir -p "$(dirname "$work")" && cp -r "$sample" "$work"

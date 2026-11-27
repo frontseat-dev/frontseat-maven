@@ -18,13 +18,4 @@
       </outputs>
     </mojo>
   </plugin>
-  <!-- Overrides the built-in declaration: the classpath is an input even for a mojo that does not ask
-       Maven to resolve dependencies. -->
-  <plugin groupId="org.codehaus.mojo" artifactId="build-helper-maven-plugin">
-    <mojo goal="regex-property">
-      <inputs>
-        <testClasspath ownOutputs="false"/>
-      </inputs>
-    </mojo>
-  </plugin>
 </plugin-io>

@@ -13,18 +13,14 @@
   <artifactId>mojo-io-maven-extension</artifactId>
   <name>mojo-io :: Maven Extension</name>
   <description>
-    Maven core extension (.mvn/extensions.xml) that wraps every mojo execution in a
-    content-addressed cache via a custom MojosExecutionStrategy.
+    Maven core extension (.mvn/extensions.xml) for build systems that cache and sandbox Maven tasks:
+    exports the task graph and records and replays what each mojo execution changes in the project.
   </description>
 
   <dependencies>
     <dependency>
       <groupId>dev.frontseat.mojoio</groupId>
       <artifactId>mojo-io-spec</artifactId>
-    </dependency>
-    <dependency>
-      <groupId>dev.frontseat.mojoio</groupId>
-      <artifactId>mojo-io-cache</artifactId>
     </dependency>
 
     <!-- Provided by the Maven runtime. -->

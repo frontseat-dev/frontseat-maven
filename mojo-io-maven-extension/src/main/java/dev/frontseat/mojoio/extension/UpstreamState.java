@@ -10,8 +10,6 @@ import java.util.Map;
 import java.util.Set;
 import org.apache.maven.execution.MavenSession;
 import org.apache.maven.model.Dependency;
-import org.apache.maven.model.Plugin;
-import org.apache.maven.model.PluginExecution;
 import org.apache.maven.plugin.MojoExecution;
 import org.apache.maven.project.MavenProject;
 
@@ -29,27 +27,6 @@ final class UpstreamState {
 
     private UpstreamState() {}
 
-    /** The lifecycle phase (Maven 4 tree) an execution is bound to, or {@code null}. */
-    static String phaseOf(MojoExecution m, MavenProject project, LifecycleModel model) {
-        String phase = m.getLifecyclePhase();
-        if (phase == null) {
-            // Invoked directly (goal@execution): the binding is in the project's model.
-            for (Plugin plugin : project.getBuildPlugins()) {
-                if (plugin.getGroupId().equals(m.getGroupId()) && plugin.getArtifactId().equals(m.getArtifactId())) {
-                    for (PluginExecution e : plugin.getExecutions()) {
-                        if (e.getId().equals(m.getExecutionId()) && e.getGoals().contains(m.getGoal())) {
-                            phase = e.getPhase();
-                        }
-                    }
-                }
-            }
-        }
-        if (phase == null && m.getMojoDescriptor() != null) {
-            phase = m.getMojoDescriptor().getPhase();
-        }
-        return phase == null || phase.isBlank() ? null : model.treePhase(phase);
-    }
-
     /**
      * Per reactor dependency of {@code project} (direct or transitive, as {@code groupId:artifactId}):
      * the phase its state may be replayed through for {@code plan}. A dependency no mojo of the plan
@@ -62,7 +39,7 @@ final class UpstreamState {
         Set<String> phases = new HashSet<>();
         Set<String> resolved = new HashSet<>();
         for (MojoExecution m : plan) {
-            String phase = phaseOf(m, project, model);
+            String phase = StateFiles.phaseOf(m, project, model);
             if (phase != null) {
                 phases.add(phase);
             }
@@ -75,7 +52,7 @@ final class UpstreamState {
         Set<String> withRuntime = new HashSet<>();
         Set<String> plugins = new java.util.LinkedHashSet<>();
         for (MojoExecution m : plan) {
-            plugins.addAll(pluginReactorDependencies(m, session));
+            plugins.addAll(TaskGraphCollector.pluginReactorDependencies(m, session));
         }
         record Step(MavenProject project, Set<String> phases, Set<String> resolved) {}
         Deque<Step> queue = new ArrayDeque<>();
@@ -131,36 +108,6 @@ final class UpstreamState {
             }
         }
         return limits;
-    }
-
-    /**
-     * Reactor projects a mojo's plugin is made of: the plugin itself, when it is built in this reactor,
-     * and its {@code <dependencies>} (for example a build-tools module holding a checkstyle
-     * configuration). Maven loads them as packaged artifacts.
-     */
-    static List<String> pluginReactorDependencies(MojoExecution m, MavenSession session) {
-        Set<String> reactor = new HashSet<>();
-        session.getAllProjects().forEach(p -> reactor.add(p.getGroupId() + ":" + p.getArtifactId()));
-        List<String> ids = new java.util.ArrayList<>();
-        if (reactor.contains(m.getGroupId() + ":" + m.getArtifactId())) {
-            ids.add(m.getGroupId() + ":" + m.getArtifactId());
-        }
-        if (m.getPlugin() != null && m.getPlugin().getDependencies() != null) {
-            for (Dependency d : m.getPlugin().getDependencies()) {
-                String id = d.getGroupId() + ":" + d.getArtifactId();
-                if (reactor.contains(id) && !ids.contains(id)) {
-                    ids.add(id);
-                }
-            }
-        }
-        for (MojoExecution fork : ForkedGoals.of(m)) {
-            for (String id : pluginReactorDependencies(fork, session)) {
-                if (!ids.contains(id)) {
-                    ids.add(id);
-                }
-            }
-        }
-        return ids;
     }
 
     /** Every reactor project reachable from {@code project} through dependencies of any scope. */

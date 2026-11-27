@@ -7,7 +7,7 @@
 <plugin-io xmlns="urn:mojo-io:plugin-io:1.0">
 
   <plugin groupId="org.apache.maven.plugins" artifactId="maven-resources-plugin">
-    <mojo goal="resources" stamping="carry">
+    <mojo goal="resources">
       <inputs>
         <resources parameter="resources"/>
         <files parameter="filters"/>
@@ -18,7 +18,7 @@
       </outputs>
       <ignoredParameters>resources</ignoredParameters>
     </mojo>
-    <mojo goal="copy-resources" stamping="carry">
+    <mojo goal="copy-resources">
       <inputs>
         <resources parameter="resources"/>
         <files parameter="filters"/>
@@ -29,7 +29,7 @@
       </outputs>
       <ignoredParameters>resources</ignoredParameters>
     </mojo>
-    <mojo goal="testResources" stamping="carry">
+    <mojo goal="testResources">
       <inputs>
         <resources parameter="resources"/>
         <files parameter="filters"/>
@@ -50,14 +50,12 @@
   </plugin>
 
   <plugin groupId="org.apache.maven.plugins" artifactId="maven-compiler-plugin">
-    <mojo goal="compile" prerequisitePhase="process-resources" stamping="carry">
+    <mojo goal="compile">
       <inputs>
         <files parameter="compileSourceRoots"/>
-        <!-- compilePath starts with the mojo's own target/classes; hashing it would make the key
-             depend on the previous run's outputs. -->
-        <classpath parameter="compilePath" excludeParameter="outputDirectory"/>
+        <classpath parameter="compilePath"/>
         <!-- javac finds annotation processors through the classpath, its own output included: the
-             service files resources copied there (found by the audit, -Dmojoio.audit). -->
+             service files resources copied there. -->
         <files expression="${project.build.outputDirectory}/META-INF/services"/>
       </inputs>
       <outputs>
@@ -71,10 +69,10 @@
       <!-- Incremental-compilation bookkeeping, not outputs. -->
       <ignoredWrites>maven-status/**</ignoredWrites>
     </mojo>
-    <mojo goal="testCompile" prerequisitePhase="process-test-resources" stamping="carry">
+    <mojo goal="testCompile">
       <inputs>
         <files parameter="compileSourceRoots"/>
-        <classpath parameter="testPath" excludeParameter="outputDirectory"/>
+        <classpath parameter="testPath"/>
       </inputs>
       <outputs>
         <directory parameter="outputDirectory" includes="**/*.class"/>
@@ -90,9 +88,8 @@
   </plugin>
 
   <plugin groupId="org.apache.maven.plugins" artifactId="maven-jar-plugin">
-    <!-- Packages classes plus metadata that embeds the version (pom.properties, the pom, MANIFEST.MF):
-         stamp values are rewritten inside the restored jar and in its file name. -->
-    <mojo goal="jar" prerequisitePhase="prepare-package" stamping="carry">
+    <!-- Packages classes plus metadata that embeds the version (pom.properties, the pom, MANIFEST.MF). -->
+    <mojo goal="jar">
       <inputs>
         <files parameter="classesDirectory"/>
         <files expression="${project.file}"/>
@@ -105,7 +102,7 @@
       <ignoredParameters>classesDirectory, forceCreation</ignoredParameters>
       <ignoredWrites>maven-archiver/**</ignoredWrites>
     </mojo>
-    <mojo goal="test-jar" prerequisitePhase="prepare-package" stamping="carry">
+    <mojo goal="test-jar">
       <inputs>
         <files parameter="testClassesDirectory"/>
         <files expression="${project.file}"/>
@@ -121,7 +118,7 @@
 
   <plugin groupId="org.apache.maven.plugins" artifactId="maven-source-plugin">
     <!-- The forking "jar" goal is skipped (it re-runs a lifecycle); jar-no-fork is the cacheable one. -->
-    <mojo goal="jar-no-fork" prerequisitePhase="prepare-package" stamping="carry">
+    <mojo goal="jar-no-fork">
       <inputs>
         <files expression="${project.compileSourceRoots}"/>
         <resources expression="${project.resources}"/>
@@ -133,7 +130,7 @@
       <ignoredParameters>forceCreation, defaultManifestFile</ignoredParameters>
       <ignoredWrites>maven-archiver/**</ignoredWrites>
     </mojo>
-    <mojo goal="test-jar-no-fork" prerequisitePhase="prepare-package" stamping="carry">
+    <mojo goal="test-jar-no-fork">
       <inputs>
         <files expression="${project.testCompileSourceRoots}"/>
         <resources expression="${project.testResources}"/>
@@ -147,9 +144,8 @@
     </mojo>
   </plugin>
 
-  <!-- Tests act on what they read (a test may assert the version), so stamps stay in their key. -->
   <plugin groupId="org.apache.maven.plugins" artifactId="maven-surefire-plugin">
-    <mojo goal="test" prerequisitePhase="process-test-classes">
+    <mojo goal="test">
       <inputs>
         <testClasspath/>
         <files parameter="classesDirectory"/>
@@ -179,7 +175,7 @@
   <plugin groupId="org.apache.maven.plugins" artifactId="maven-failsafe-plugin">
     <!-- Integration tests often reach outside the project (servers, containers, databases): if yours
          do, mark this goal cacheable="false" in .mvn/plugin-io/. -->
-    <mojo goal="integration-test" prerequisitePhase="package">
+    <mojo goal="integration-test">
       <inputs>
         <testClasspath/>
         <files parameter="classesDirectory"/>

@@ -15,7 +15,6 @@ final class PluginIoMapper {
     static MojoCacheDescriptor toDescriptor(String pluginKey, MojoIo io, String source) {
         String[] ga = pluginKey.split(":", 2);
         MojoCacheDescriptor.Builder b = MojoCacheDescriptor.forGoal(ga[0], ga[1], io.goal()).source(source)
-                .stampingCarry(io.stampingCarry())
                 .ignoreWrites(io.ignoredWrites());
         if (!io.cacheable()) {
             return b.notCacheable(io.reason()).build();
@@ -34,9 +33,6 @@ final class PluginIoMapper {
             return b.notCacheable(e.getMessage() + " (in " + source + ")").build();
         }
         io.ignoredParameters().forEach(b::ignore);
-        if (io.prerequisitePhase() != null) {
-            b.prerequisitePhase(io.prerequisitePhase());
-        }
         return b.build();
     }
 
@@ -49,8 +45,8 @@ final class PluginIoMapper {
             case "files" -> Inputs.excluding(d.attribute("expression").isPresent()
                     ? Inputs.filesAt(d.required("expression"))
                     : Inputs.files(d.required("parameter")), split(d.attribute("excludes").orElse("")));
-            case "classpath" -> Inputs.classpath(d.required("parameter"), d.attribute("excludeParameter").orElse(null));
-            case "testClasspath" -> Inputs.testClasspath(!"false".equals(d.attribute("ownOutputs").orElse("true")));
+            case "classpath" -> Inputs.classpath(d.required("parameter"));
+            case "testClasspath" -> Inputs.testClasspath();
             case "projectFiles" -> Inputs.projectFiles(split(d.attribute("excludes").orElse("")));
             case "projectModel" -> Inputs.projectModel();
             case "reactorModels" -> Inputs.reactorModels();

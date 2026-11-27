@@ -79,7 +79,3 @@ run = "mvn install -DskipTests"
 [tasks.clean]
 description = "Remove build outputs"
 run = "mvn clean"
-
-[tasks."cache:clear"]
-description = "Delete the local mojo-io cache (MOJOIO_CACHE_DIR or ~/.m2/mojo-io-cache)"
-run = 'rm -rf "${MOJOIO_CACHE_DIR:-$HOME/.m2/mojo-io-cache}"'

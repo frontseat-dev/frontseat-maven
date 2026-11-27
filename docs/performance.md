@@ -7,30 +7,15 @@ Measured with `mise run perf` (`perf/Bench.java`) on a generated reactor:
 - median of 3 runs on a 4-core container;
 - Maven 3.9 and mvnd 1.0.6 (which embeds Maven 3.9).
 
-The same pass also covers the whole suite: all ITs pass through mvnd, and `ExternalBuildSystemIT` takes
-6.9s through mvnd versus about 37s through mvn.
-
 | Scenario | mvn | mvn + mojo-io | mvnd | mvnd + mojo-io |
 |---|---|---|---|---|
-| clean verify, empty cache (cold) | 15.7s | 16.7s (+6%) | 12.1s | 12.8s (+6%) |
-| clean verify, cache off (state + strict only) | | 16.6s | | 11.4s |
-| clean verify, warm cache | | **2.7s** (5.8×) | | **0.6s** (20×) |
-| verify, nothing changed | 12.6s | **2.5s** | 9.6s | **0.6s** |
-| verify, 1 source changed in the first module | 16.9s | **3.2s** | 10.6s | **0.7s** |
+| clean verify | 15.7s | | 12.1s | |
 | graph export (dry run) | | 1.9s | | 0.2s |
 | invocation floor (`-pl m19 -am validate`) | 1.2s | 1.3s | 0.1s | 0.1s |
 | one task: `surefire:test` in m19 (`-pl -am -Dmojoio.only`) | | 2.4s | | **0.6s** |
 
-Notes:
-- **Cold overhead** is the price of hashing inputs, storing entries, recording state and the
-  strict-mode write check: about 6%.
-- **The first version cost +24% (mvn) and +30% (mvnd).** Two fixes brought it down:
-  - Content hashes are memoized by path, size and modification time. A reactor otherwise re-hashes
-    the same upstream jars for every downstream module and mojo, which grows with the square of the
-    module count.
-  - Each mojo's "after" snapshot is reused as the next mojo's "before".
-- **"1 source changed"** appends a comment to one class in `m00`. The recompiled class is identical,
-  so every downstream key is unchanged: only `m00`'s compile re-runs.
+The graph export runs no mojo. The invocation floor runs no mojo of the default lifecycle. The single
+task ran with the extension recording and replaying state only, as a build system runs it.
 
 ## Build systems: avoid JVM and Maven startup per task
 
@@ -39,8 +24,7 @@ pays JVM start, Maven bootstrap and model building: the **invocation floor**, 1.
 on bigger reactors. Run tasks through **mvnd** instead:
 - the floor drops to about 0.1s;
 - a single task (`surefire:test` of the last module, against restored upstream outputs) takes 0.6s
-  instead of 2.4s;
-- the hash memo lives in the daemon, so warm builds also skip re-hashing unchanged files.
+  instead of 2.4s.
 
 mojo-io works unchanged under mvnd (`mise run it:mvnd` runs every IT through it). Things to know:
 - **Per-build state:** mojo-io keys its per-build state by build session, because one daemon runs many
@@ -109,9 +93,7 @@ Nx (the same calls, 4 at a time):
 So: **join executions into fewer tasks** with `mojoio.graph.granularity` (see
 [task graph](task-graph.md#granularity)). This works in every build system, including remote
 execution (Bazel/REAPI), where an action can't be batched with others and each one starts a cold JVM.
-Joining trades cache granularity for fewer invocations. To get some of it back, a build system can
-leave mojo-io's own local cache on inside a task (`innerCache` in the Nx adapter): when a task
-re-runs, its mojos with unchanged inputs are restored instead of run.
+Joining trades cache granularity for fewer invocations.
 
 ## Remote execution: Buildbarn (`adapters/reapi`)
 

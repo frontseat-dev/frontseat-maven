@@ -15,9 +15,10 @@ import org.apache.maven.project.MavenProject;
 
 /**
  * A mojo that forks other executions first (e.g. {@code spotbugs:check} forks {@code spotbugs:spotbugs},
- * {@code pmd:check} forks {@code pmd:pmd}) runs them inside its own run, so they are cached as one unit:
- * the forked executions' configuration and inputs join the key, their outputs join the entry. That needs
- * a cacheable declaration for every forked execution, all in the mojo's own project.
+ * {@code pmd:check} forks {@code pmd:pmd}) runs them inside its own run, so they are one unit in the task
+ * graph: the forked executions' configuration and inputs join the mojo's inputs (and fingerprint), their
+ * outputs join its outputs. That needs a cacheable declaration for every forked execution, all in the
+ * mojo's own project.
  */
 final class ForkedGoals {
 
@@ -91,8 +92,8 @@ final class ForkedGoals {
                 inputs.add(ctx -> {
                     ExecutionContext forkCtx = forkContext(ctx, fork);
                     List<ResolvedInput> resolved = new ArrayList<>();
-                    resolved.add(ResolvedInput.value(prefix + "configuration", CacheKeyCalculator.mojoId(fork) + "\n"
-                            + CacheKeyCalculator.pluginDependencies(fork.getPlugin()) + "\n"
+                    resolved.add(ResolvedInput.value(prefix + "configuration", Fingerprint.mojoId(fork) + "\n"
+                            + Fingerprint.pluginDependencies(fork.getPlugin()) + "\n"
                             + ConfigurationHasher.render(forkCtx, forked.ignoredParameters())));
                     for (InputSpec spec : forked.inputs()) {
                         for (ResolvedInput in : spec.resolve(forkCtx)) {
@@ -112,7 +113,6 @@ final class ForkedGoals {
     }
 
     private static ExecutionContext forkContext(ExecutionContext ctx, MojoExecution fork) {
-        return new ExecutionContext(ctx.session(), ctx.project(), fork, ctx.normalizer(), ctx.analysisOnly())
-                .withTestClasspath(ctx.testClasspathResolver());
+        return new ExecutionContext(ctx.session(), ctx.project(), fork, ctx.normalizer());
     }
 }

@@ -40,6 +40,9 @@ public class TaskGraphCollector {
 
     private static final Logger LOG = LoggerFactory.getLogger(TaskGraphCollector.class);
 
+    /** What Maven itself writes in a build directory while a mojo runs (Maven 4's consumer pom). */
+    static final List<String> MAVEN_WRITES = List.of("consumer-*.pom");
+
     private final DescriptorRegistry registry;
     private final RuntimeInformation runtime;
     private final DependencyResolution dependencies;
@@ -141,6 +144,36 @@ public class TaskGraphCollector {
         LOG.info("[mojo-io] GRAPH {}: {} execution(s) described, none run", project.getArtifactId(), list.size());
     }
 
+    /**
+     * Reactor projects a mojo's plugin is made of: the plugin itself, when it is built in this reactor,
+     * and its {@code <dependencies>} (for example a build-tools module holding a checkstyle
+     * configuration). Maven loads them as packaged artifacts.
+     */
+    static List<String> pluginReactorDependencies(MojoExecution m, MavenSession session) {
+        Set<String> reactor = new java.util.HashSet<>();
+        session.getAllProjects().forEach(p -> reactor.add(p.getGroupId() + ":" + p.getArtifactId()));
+        List<String> ids = new java.util.ArrayList<>();
+        if (reactor.contains(m.getGroupId() + ":" + m.getArtifactId())) {
+            ids.add(m.getGroupId() + ":" + m.getArtifactId());
+        }
+        if (m.getPlugin() != null && m.getPlugin().getDependencies() != null) {
+            for (org.apache.maven.model.Dependency d : m.getPlugin().getDependencies()) {
+                String id = d.getGroupId() + ":" + d.getArtifactId();
+                if (reactor.contains(id) && !ids.contains(id)) {
+                    ids.add(id);
+                }
+            }
+        }
+        for (MojoExecution fork : ForkedGoals.of(m)) {
+            for (String id : pluginReactorDependencies(fork, session)) {
+                if (!ids.contains(id)) {
+                    ids.add(id);
+                }
+            }
+        }
+        return ids;
+    }
+
     /** Reactor projects other than {@code project} named by coordinates in its build plugins' configuration. */
     static List<String> configurationReferences(MavenProject project, java.util.Set<String> reactorIds) {
         java.util.Set<String> found = new java.util.LinkedHashSet<>();
@@ -218,7 +251,7 @@ public class TaskGraphCollector {
         String resolution = ForkedGoals.resolution(m);
         e.put("requiresDependencyResolution", resolution == null || resolution.isBlank() ? null : resolution);
         // Plugins and plugin dependencies built in this reactor: needed packaged before the mojo runs.
-        e.put("pluginReactorDependencies", UpstreamState.pluginReactorDependencies(m, session));
+        e.put("pluginReactorDependencies", pluginReactorDependencies(m, session));
         // Invoked as a goal, Maven runs an aggregator once, for the build's top-level project, whatever
         // project it is bound in.
         e.put("aggregator", m.getMojoDescriptor() != null && m.getMojoDescriptor().isAggregator());
@@ -226,10 +259,9 @@ public class TaskGraphCollector {
         Optional<MojoCacheDescriptor> descriptor = registry.find(m, session)
                 .map(d -> ForkedGoals.merge(m, project, session, registry, d));
         e.put("declaredBy", descriptor.map(MojoCacheDescriptor::source).orElse(null));
-        e.put("stamping", descriptor.map(d -> d.stampingCarry() ? "carry" : "exact").orElse("exact"));
         // Bookkeeping the execution (or Maven itself) writes in the build directory: not outputs. Build
         // systems must leave these out of observed outputs, or they make hashes unstable.
-        List<String> ignoredWrites = new ArrayList<>(WriteSnapshot.MAVEN_WRITES);
+        List<String> ignoredWrites = new ArrayList<>(MAVEN_WRITES);
         descriptor.ifPresent(d -> ignoredWrites.addAll(d.ignoredWrites()));
         e.put("ignoredWrites", ignoredWrites);
 
@@ -245,9 +277,9 @@ public class TaskGraphCollector {
                 && !descriptor.get().reactorWide()) {
             reason = "aggregator mojo without a reactorModels input";
         } else {
-            ExecutionContext ctx = new ExecutionContext(session, project, m, normalizer, true);
+            ExecutionContext ctx = new ExecutionContext(session, project, m, normalizer);
             try {
-                fingerprint = CacheKeyCalculator.fingerprint(ctx, descriptor.get());
+                fingerprint = Fingerprint.of(ctx, descriptor.get());
                 for (InputSpec spec : descriptor.get().inputs()) {
                     for (ResolvedInput in : spec.resolve(ctx)) {
                         inputs.add(input(in, normalizer));
@@ -298,7 +330,7 @@ public class TaskGraphCollector {
         o.put("includes", out.includes());
         o.put("excludes", out.excludes());
         if (out.observed()) {
-            // Known only after the run: the exact files are listed as `output` records in the stateFile.
+            // Known only after the run: whatever the execution writes there.
             o.put("observed", true);
         }
         return o;
@@ -574,7 +606,7 @@ public class TaskGraphCollector {
                 @Override
                 public java.nio.file.FileVisitResult visitFile(Path file, java.nio.file.attribute.BasicFileAttributes a) {
                     String rel = base.relativize(file).toString().replace('\\', '/');
-                    if (a.isRegularFile() && dev.frontseat.mojoio.cache.AntPattern.selected(rel, patterns, List.of())) {
+                    if (a.isRegularFile() && dev.frontseat.mojoio.spec.AntPattern.selected(rel, patterns, List.of())) {
                         files.add(file);
                     }
                     return java.nio.file.FileVisitResult.CONTINUE;

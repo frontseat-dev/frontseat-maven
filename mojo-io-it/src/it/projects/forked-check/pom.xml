@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
   pmd:check forks pmd:pmd (@Execute(goal = "pmd")): the forked goal runs inside the check's own run, so
-  the two are cached as one unit. The declarations are in .mvn/plugin-io/pmd.xml.
+  the two are one unit in the task graph. The declarations are in .mvn/plugin-io/pmd.xml.
 -->
 <project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"

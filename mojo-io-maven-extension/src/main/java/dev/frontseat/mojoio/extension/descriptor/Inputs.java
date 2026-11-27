@@ -1,7 +1,7 @@
 package dev.frontseat.mojoio.extension.descriptor;
 
-import dev.frontseat.mojoio.cache.AntPattern;
-import dev.frontseat.mojoio.cache.FileTrees;
+import dev.frontseat.mojoio.extension.Hashing;
+import dev.frontseat.mojoio.spec.AntPattern;
 import dev.frontseat.mojoio.extension.ExecutionContext;
 import dev.frontseat.mojoio.extension.NotCacheableException;
 import java.nio.file.Path;
@@ -40,71 +40,21 @@ public final class Inputs {
     }
 
     /**
-     * A classpath parameter, compared by content in order. The mojo's own output directory is skipped:
-     * Maven puts it on the classpath (javac's {@code compilePath} starts with {@code target/classes}),
-     * which would make the key depend on the previous run's outputs.
+     * A classpath parameter, described by the dependency scope the mojo resolves: the build system covers
+     * reactor entries through the task's dependsOn and the others through the project's external
+     * dependencies.
      */
-    public static InputSpec classpath(String parameter, String ownOutputParameter) {
+    public static InputSpec classpath(String parameter) {
         return ctx -> {
             String scope = ctx.execution().getMojoDescriptor() == null ? null
                     : ctx.execution().getMojoDescriptor().getDependencyResolutionRequired();
-            if (ctx.analysisOnly()) {
-                return List.of(ResolvedInput.classpath(parameter, List.of(), scope));
-            }
-            List<Path> own = ownOutputParameter == null ? List.of() : ctx.parameterPaths(ownOutputParameter);
-            List<Path> paths = new ArrayList<>(ctx.parameterPaths(parameter));
-            paths.removeAll(own);
-            return List.of(ResolvedInput.classpath(parameter, paths, scope));
+            return List.of(ResolvedInput.classpath(parameter, scope));
         };
     }
 
     /** The project's test classpath, for mojos that build it internally (surefire). */
     public static InputSpec testClasspath() {
-        return testClasspath(true);
-    }
-
-    /**
-     * @param ownOutputs false leaves out the project's own classes and test-classes directories: for
-     *                   mojos that only need the dependencies, or that run before those directories are
-     *                   built (their content would be whatever an earlier build left there)
-     */
-    public static InputSpec testClasspath(boolean ownOutputs) {
-        return ctx -> {
-            if (ctx.analysisOnly()) {
-                return List.of(ResolvedInput.classpath("testClasspath", List.of(), "test"));
-            }
-            List<Path> paths = new ArrayList<>();
-            List<String> versioned;
-            try {
-                Path classes = Path.of(ctx.project().getBuild().getOutputDirectory()).toAbsolutePath().normalize();
-                Path testClasses = Path.of(ctx.project().getBuild().getTestOutputDirectory()).toAbsolutePath().normalize();
-                dev.frontseat.mojoio.extension.ExecutionContext.Classpath classpath = ctx.testClasspath();
-                if (classpath == null) {
-                    List<Path> elements = new ArrayList<>();
-                    for (String element : ctx.project().getTestClasspathElements()) {
-                        elements.add(Path.of(element));
-                    }
-                    classpath = dev.frontseat.mojoio.extension.DependencyResolution.byVersionOf(ctx.project(), ctx.session(), elements);
-                }
-                versioned = classpath.versioned();
-                for (Path element : classpath.paths()) {
-                    Path path = element.toAbsolutePath().normalize();
-                    if (ownOutputs || !(path.equals(classes) || path.equals(testClasses))) {
-                        paths.add(element);
-                    }
-                }
-            } catch (NotCacheableException e) {
-                throw e;
-            } catch (Exception e) {
-                throw new NotCacheableException("cannot compute test classpath: " + e.getMessage(), e);
-            }
-            List<ResolvedInput> inputs = new ArrayList<>();
-            inputs.add(ResolvedInput.classpath("testClasspath", paths, "test"));
-            if (!versioned.isEmpty()) {
-                inputs.add(ResolvedInput.value("testClasspath.versions", String.join(",", versioned)));
-            }
-            return inputs;
-        };
+        return ctx -> List.of(ResolvedInput.classpath("testClasspath", "test"));
     }
 
     /**
@@ -161,7 +111,7 @@ public final class Inputs {
                 models.put(p.getGroupId() + ":" + p.getArtifactId(), modelHash(ctx, p, false));
             }
             // An aggregator does its work in the project the build was started from.
-            return List.of(ResolvedInput.value("reactorModels", dev.frontseat.mojoio.cache.Hashing.sha256(
+            return List.of(ResolvedInput.value("reactorModels", Hashing.sha256(
                     models + " executionRoot=" + ctx.project().isExecutionRoot())));
         };
     }
@@ -197,7 +147,7 @@ public final class Inputs {
         } catch (java.io.IOException e) {
             throw new NotCacheableException("cannot serialize the project model: " + e.getMessage(), e);
         }
-        return dev.frontseat.mojoio.cache.Hashing.sha256(ctx.normalizer().normalize(out + "\nproperties=" + properties));
+        return Hashing.sha256(ctx.normalizer().normalize(out + "\nproperties=" + properties));
     }
 
     /** The Maven version, for mojos whose result depends on it (a rule requiring a Maven version). */

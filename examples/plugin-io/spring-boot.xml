@@ -27,7 +27,7 @@
     <mojo goal="repackage">
       <inputs>
         <files expression="${project.artifact.file}"/>
-        <testClasspath ownOutputs="false"/>
+        <testClasspath/>
       </inputs>
       <outputs>
         <observed/>

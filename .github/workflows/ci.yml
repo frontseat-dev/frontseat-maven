@@ -29,7 +29,7 @@ jobs:
               bad=1
             fi
           done < <(git log --no-merges --format='%h %s' "$BASE..$HEAD")
-          [ "$bad" = 0 ] || { echo "Use <type>(<scope>)!: <summary>, e.g. 'fix(cache): never restore a damaged blob'"; exit 1; }
+          [ "$bad" = 0 ] || { echo "Use <type>(<scope>)!: <summary>, e.g. 'fix(extension): replay state files in execution order'"; exit 1; }
 
   build:
     runs-on: ubuntu-latest

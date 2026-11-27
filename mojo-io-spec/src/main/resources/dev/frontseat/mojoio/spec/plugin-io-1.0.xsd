@@ -43,28 +43,14 @@
       <!-- Comma or whitespace separated parameters that cannot affect outputs. -->
       <xs:element name="ignoredParameters" type="xs:string" minOccurs="0"/>
       <!-- Comma or whitespace separated Ant patterns, relative to the project build directory, for
-           files the mojo writes that are bookkeeping, not outputs (e.g. maven-status/**). Strict mode
-           reports any other write outside the declared outputs. -->
+           files the mojo writes that are bookkeeping, not outputs (e.g. maven-status/**). A build system's
+           write check treats any other write outside the declared outputs as undeclared. -->
       <xs:element name="ignoredWrites" type="xs:string" minOccurs="0"/>
     </xs:sequence>
     <xs:attribute name="goal" type="xs:string" use="required"/>
     <xs:attribute name="cacheable" type="xs:boolean" default="true"/>
     <!-- Required when cacheable="false". -->
     <xs:attribute name="reason" type="xs:string"/>
-    <!-- Phase that must have run before this goal when it is invoked directly. -->
-    <xs:attribute name="prerequisitePhase" type="xs:string"/>
-    <!-- How the mojo treats stamp values (project version, build numbers):
-         exact (default): it may act on them, so they stay in the cache key;
-         carry: it only copies them into outputs (compilers, resource filtering, archivers), so they
-                are excluded from the key and rewritten in restored outputs. -->
-    <xs:attribute name="stamping" default="exact">
-      <xs:simpleType>
-        <xs:restriction base="xs:string">
-          <xs:enumeration value="exact"/>
-          <xs:enumeration value="carry"/>
-        </xs:restriction>
-      </xs:simpleType>
-    </xs:attribute>
   </xs:complexType>
 
   <xs:complexType name="Inputs">
@@ -79,20 +65,15 @@
           <xs:attribute name="excludes" type="xs:string"/>
         </xs:complexType>
       </xs:element>
-      <!-- An ordered classpath; elements hashed by content, not location. -->
+      <!-- A classpath parameter, described by the dependency scope the mojo resolves. -->
       <xs:element name="classpath">
         <xs:complexType>
           <xs:attribute name="parameter" type="xs:string" use="required"/>
-          <!-- Skip this entry (typically the mojo's own output directory). -->
-          <xs:attribute name="excludeParameter" type="xs:string"/>
         </xs:complexType>
       </xs:element>
-      <!-- The project's resolved test classpath, for mojos that compute it internally. -->
+      <!-- The project's test classpath, for mojos that compute it internally. -->
       <xs:element name="testClasspath">
-        <xs:complexType>
-          <!-- false: without the project's own classes and test-classes directories (dependencies only). -->
-          <xs:attribute name="ownOutputs" type="xs:boolean"/>
-        </xs:complexType>
+        <xs:complexType/>
       </xs:element>
       <!-- A List<Resource> parameter: resource settings plus selected file content; filtering adds
            project coordinates, project properties and user properties. -->

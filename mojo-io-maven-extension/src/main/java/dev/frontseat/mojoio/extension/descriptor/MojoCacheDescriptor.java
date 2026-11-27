@@ -6,12 +6,11 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * Executable form of a plugin-io declaration: how one plugin goal is cached: which inputs go into the key, which files are its outputs,
- * which configuration parameters to leave out of the configuration hash, and which lifecycle phase it
- * needs to have run before it when invoked directly from the command line.
+ * Executable form of a plugin-io declaration: what one plugin goal reads (its inputs), which files are
+ * its outputs, and which configuration parameters to leave out of its fingerprint.
  *
- * <p>The effective configuration is always hashed, so inputs only need to cover what the configuration
- * hash cannot see: the <em>content</em> of files and directories it points at.
+ * <p>The effective configuration is always part of the fingerprint, so inputs only need to cover what it
+ * cannot see: the <em>content</em> of files and directories it points at.
  */
 public final class MojoCacheDescriptor {
 
@@ -29,9 +28,7 @@ public final class MojoCacheDescriptor {
     private final List<InputSpec> inputs;
     private final List<OutputSpec> outputs;
     private final Set<String> ignoredParameters;
-    private final String prerequisitePhase;
     private final String source;
-    private final boolean stampingCarry;
     private final List<String> ignoredWrites;
     private final boolean reactorWide;
 
@@ -39,7 +36,6 @@ public final class MojoCacheDescriptor {
         this.ignoredWrites = List.copyOf(b.ignoredWrites);
         this.reactorWide = b.reactorWide;
         this.source = b.source;
-        this.stampingCarry = b.stampingCarry;
         this.pluginKey = b.pluginKey;
         this.goal = b.goal;
         this.notCacheableReason = b.notCacheableReason;
@@ -48,7 +44,6 @@ public final class MojoCacheDescriptor {
         Set<String> ignored = new LinkedHashSet<>(ALWAYS_IGNORED);
         ignored.addAll(b.ignored);
         this.ignoredParameters = Set.copyOf(ignored);
-        this.prerequisitePhase = b.prerequisitePhase;
     }
 
     public static Builder forGoal(String groupId, String artifactId, String goal) {
@@ -83,15 +78,7 @@ public final class MojoCacheDescriptor {
         return ignoredParameters;
     }
 
-    /**
-     * {@code stamping="carry"}: stamp values only travel into outputs, so they are tokenized in the key
-     * and rewritten on restore. Otherwise they are part of the key.
-     */
-    public boolean stampingCarry() {
-        return stampingCarry;
-    }
-
-    /** Ant patterns, relative to the build directory, of bookkeeping writes strict mode does not report. */
+    /** Ant patterns, relative to the build directory, of bookkeeping writes that are no outputs. */
     public List<String> ignoredWrites() {
         return ignoredWrites;
     }
@@ -104,14 +91,9 @@ public final class MojoCacheDescriptor {
         return reactorWide;
     }
 
-    /** Where this descriptor came from (built-in, plugin, project file); shown in key manifests. */
+    /** Where this descriptor came from (built-in, plugin, project file); the graph's declaredBy. */
     public String source() {
         return source;
-    }
-
-    /** Lifecycle phase to run first when this goal is invoked directly, or {@code null}. */
-    public String prerequisitePhase() {
-        return prerequisitePhase;
     }
 
     private Builder copy() {
@@ -120,9 +102,7 @@ public final class MojoCacheDescriptor {
         b.inputs.addAll(inputs);
         b.outputs.addAll(outputs);
         b.ignored.addAll(ignoredParameters);
-        b.prerequisitePhase = prerequisitePhase;
         b.source = source;
-        b.stampingCarry = stampingCarry;
         b.ignoredWrites.addAll(ignoredWrites);
         b.reactorWide = reactorWide;
         return b;
@@ -150,9 +130,7 @@ public final class MojoCacheDescriptor {
         private final List<InputSpec> inputs = new ArrayList<>();
         private final List<OutputSpec> outputs = new ArrayList<>();
         private final Set<String> ignored = new LinkedHashSet<>();
-        private String prerequisitePhase;
         private String source = "code";
-        private boolean stampingCarry;
         private final List<String> ignoredWrites = new ArrayList<>();
         private boolean reactorWide;
 
@@ -190,18 +168,8 @@ public final class MojoCacheDescriptor {
             return this;
         }
 
-        public Builder stampingCarry(boolean carry) {
-            this.stampingCarry = carry;
-            return this;
-        }
-
         public Builder source(String source) {
             this.source = source;
-            return this;
-        }
-
-        public Builder prerequisitePhase(String phase) {
-            this.prerequisitePhase = phase;
             return this;
         }
 

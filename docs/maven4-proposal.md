@@ -1,8 +1,10 @@
 # Proposal: making Maven 4 friendly to monorepo tooling
 
 **Status:** draft for discussion with the Apache Maven project.
-**Prototype:** this repository. The same extension jar runs unchanged on Maven 3.9.11 and
-4.0.0-rc-7, and both lines are covered by integration tests (`mise run ci`).
+**Prototype:** this repository: a core extension that exports a build as a task graph and records and
+replays what each mojo changes in the project, for build systems that cache and sandbox Maven tasks.
+The same extension jar runs unchanged on Maven 3.9.11 and 4.0.0-rc-7, and both lines are covered by
+integration tests (`mise run ci`).
 
 ## Problem
 
@@ -67,8 +69,8 @@ mutations go through `org.apache.maven.api.services.ProjectManager`: `addSourceR
 per mojo execution as a **project delta**, a cache could store the delta with the outputs and
 replay it exactly.
 
-Plugins still on the Maven 3 API mutate `MavenProject` directly. For them, a cache keeps the approach
-this prototype uses: snapshot before, diff after, and refuse to cache changes it can't replay. The
+Plugins still on the Maven 3 API mutate `MavenProject` directly. For them, a tool keeps the approach
+this prototype uses: snapshot before, diff after, and mark changes it can't replay as such. The
 delta API makes v4 plugins exact and leaves v3 plugins safe.
 
 ### P3: an execution-strategy SPI in the API
@@ -83,31 +85,30 @@ execution and build scans could then share one supported hook instead of interna
 
 - **Prerequisites (opt-in):** a mojo may declare the phase that must have run before it when invoked
   directly (as `plugin.xml` already has `<phase>`). `mvn surefire:test` then runs or restores
-  compile first.
+  compile first. The prototype leaves this to the build system, which orders tasks itself.
 - **Graph export:** a dry-run mode that prints the per-project mojo execution plan with each
   execution's declared inputs, outputs and inter-module edges as JSON. External orchestrators (an Nx
   project-graph plugin, Frontseat) can then schedule and cache Maven tasks without running Maven
-  to discover them.
+  to discover them. The prototype implements this ([task graph](task-graph.md)).
 
 ### P5: portable paths
 
 Cache keys must not depend on where a checkout lives. Maven 4 already exposes the root directory
 (`session.rootDirectory`). Standardizing how evaluated paths are relativized (module, root, local
 repository) lets independent tools compute the same keys. This prototype uses
-`@@BASEDIR@@`, `@@ROOT@@` and `@@M2REPO@@` tokens. It also means modules with identical inputs share
-cache entries.
+`@@BASEDIR@@`, `@@ROOT@@` and `@@M2REPO@@` tokens in fingerprints and state files, and
+`{projectRoot}`, `{workspaceRoot}` and `{localRepository}` in the task graph.
 
 ## Evidence from the prototype
 
-- One extension jar runs on **Maven 3.9.11 and 4.0.0-rc-7**. On a fresh checkout at another path,
-  `mvn surefire:test` restores resources, compile, testCompile and `jacoco:prepare-agent`, then runs
-  the tests with the relocated agent.
-- Six goals are described entirely by `plugin-io.xml` (`builtin-plugin-io.xml`). The integration
-  tests found three subtle errors that P1–P3 would remove by construction:
-  - the evaluator ignoring `default-value` fallback;
-  - classpath expressions that stay empty until the artifact filter is set;
-  - a classpath that contains the mojo's own output.
-  See [design notes](design.md).
+- One extension jar runs on **Maven 3.9.11 and 4.0.0-rc-7**. A reference build system in the
+  integration tests builds a reactor task by task, each task in a fresh sandbox, and restores a fresh
+  checkout at another path entirely from its cache. Copying only the `target/` directories into
+  another checkout is enough to continue with `mvn surefire:test`: the replayed state attaches
+  JaCoCo's agent, relocated to the new checkout.
+- The common goals are described entirely by `plugin-io.xml` (`builtin-plugin-io.xml`). The
+  integration tests found subtle errors that P1–P3 would remove by construction, such as the evaluator
+  ignoring the `default-value` fallback. See [design notes](design.md).
 
 ## Feedback on Maven 4's phase links (4.0.0-rc-7)
 
@@ -133,5 +134,5 @@ invalidation (see `docs/task-graph.md#phase-links`). Two gaps showed up while te
 
 - Should declarations live in `plugin.xml` (one file) or remain a separate resource (independent
   versioning)?
-- How should toolchains enter the key? Today the key uses the JDK that runs Maven.
+- How should toolchains enter the key? Today the fingerprint uses the JDK that runs Maven.
 - Where is the line between I/O declared by the plugin and per-project overrides that bypass it?

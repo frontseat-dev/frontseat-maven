@@ -4,9 +4,9 @@
   Verified on Tycho's RCP demo (docs/real-projects.md).
 
   Tycho compiles from its own model: source folders and output from build.properties, the classpath
-  from the bundles p2 resolved for the MANIFEST.MF. The test classpath input covers those bundles by
-  their fully qualified versions (p2 never reuses a version for other content) and bundles of this
-  reactor by content.
+  from the bundles p2 resolved for the MANIFEST.MF. The test classpath input stands for those bundles:
+  a build system covers them by their fully qualified versions in externalDependencies (p2 never reuses
+  a version for other content) and bundles of this reactor through the task's dependsOn.
 
   A build qualifier is written into every manifest and feature.xml. With Tycho's default (the build
   time) every build is new: use a fixed qualifier (forceContextQualifier) or one from git
@@ -26,14 +26,14 @@
   </plugin>
 
   <plugin groupId="org.eclipse.tycho" artifactId="tycho-compiler-plugin">
-    <mojo goal="compile" stamping="carry">
+    <mojo goal="compile">
       <inputs>
         <!-- The source folders build.properties names: Tycho sets them as compile source roots while
              the build runs (validate-classpath), so a task graph exported beforehand would see Maven's
              defaults instead. The project's own files cover them, MANIFEST.MF, build.properties and
              the JDT settings (useProjectSettings). -->
         <projectFiles/>
-        <testClasspath ownOutputs="false"/>
+        <testClasspath/>
       </inputs>
       <outputs>
         <!-- Classes and the resources copied from the source folders (copyResources). -->
@@ -42,11 +42,11 @@
       </outputs>
       <ignoredWrites>maven-status/**, compile-logs/**</ignoredWrites>
     </mojo>
-    <mojo goal="testCompile" stamping="carry">
+    <mojo goal="testCompile">
       <inputs>
         <projectFiles/>
         <files expression="${project.build.outputDirectory}"/>
-        <testClasspath ownOutputs="false"/>
+        <testClasspath/>
       </inputs>
       <outputs>
         <directory expression="${project.build.testOutputDirectory}"/>
@@ -66,7 +66,7 @@
         <files expression="${project.build.outputDirectory}" excludes="OSGI-INF/**"/>
         <files expression="${project.basedir}/META-INF/MANIFEST.MF"/>
         <files expression="${project.basedir}/.settings"/>
-        <testClasspath ownOutputs="false"/>
+        <testClasspath/>
       </inputs>
       <outputs>
         <directory expression="${project.build.outputDirectory}/OSGI-INF"/>
@@ -83,7 +83,7 @@
         <files expression="${project.basedir}/META-INF/MANIFEST.MF"/>
         <files expression="${project.basedir}/build.properties"/>
         <files expression="${project.build.outputDirectory}"/>
-        <testClasspath ownOutputs="false"/>
+        <testClasspath/>
       </inputs>
       <outputs>
         <observed/>
@@ -92,8 +92,7 @@
   </plugin>
 
   <plugin groupId="org.eclipse.tycho" artifactId="tycho-packaging-plugin">
-    <!-- Checks that the pom's version and id match the project's own metadata (found by the audit:
-         -Dmojoio.audit). -->
+    <!-- Checks that the pom's version and id match the project's own metadata. -->
     <mojo goal="validate-version">
       <inputs>
         <projectModel/>

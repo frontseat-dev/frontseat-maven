@@ -59,7 +59,6 @@ class DescriptorRegistryTest {
         builtin.values().forEach(d -> assertEquals(!Set.of("clean", "install", "deploy").contains(d.goal()),
                 d.cacheable(), d.goal() + ": " + d.notCacheableReason()));
         MojoCacheDescriptor surefire = builtin.get("org.apache.maven.plugins:maven-surefire-plugin:test");
-        assertEquals("process-test-classes", surefire.prerequisitePhase());
         assertTrue(surefire.ignoredParameters().contains("forkNode"));
         assertTrue(surefire.ignoredParameters().contains("project"), "Maven objects are always ignored");
     }

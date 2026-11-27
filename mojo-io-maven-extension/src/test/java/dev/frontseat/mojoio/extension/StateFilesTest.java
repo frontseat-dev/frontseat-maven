@@ -4,7 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import dev.frontseat.mojoio.cache.CacheEntry;
+import dev.frontseat.mojoio.spec.StateChange;
 import dev.frontseat.mojoio.spec.StateFile;
 import java.io.File;
 import java.nio.file.Files;
@@ -53,7 +53,7 @@ class StateFilesTest {
     void stateDeletedByALaterMojoIsWrittenAgain(@TempDir Path dir) throws Exception {
         MavenProject project = project(dir);
         MojoExecution qualifier = execution("packaging-plugin", "build-qualifier", "default");
-        StateFiles.record(project, qualifier, List.of(new CacheEntry.StateRecord("property", "buildQualifier", "v1")),
+        StateFiles.record(project, qualifier, List.of(new StateChange("property", "buildQualifier", "v1")),
                 null, "validate");
         Path file = StateFiles.file(project, qualifier);
         assertTrue(Files.exists(file));

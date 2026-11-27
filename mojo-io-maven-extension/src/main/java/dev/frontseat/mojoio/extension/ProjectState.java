@@ -1,6 +1,6 @@
 package dev.frontseat.mojoio.extension;
 
-import dev.frontseat.mojoio.cache.CacheEntry.StateRecord;
+import dev.frontseat.mojoio.spec.StateChange;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -17,11 +17,11 @@ import org.slf4j.LoggerFactory;
 
 /**
  * The parts of {@link MavenProject} that mojos commonly mutate and that later mojos read. A snapshot
- * is taken before a cache-miss execution and diffed afterwards; the diff is stored with the outputs
- * and replayed on a hit.
+ * is taken before an execution and diffed afterwards; the diff is recorded in the execution's state
+ * file and replayed when the execution does not run.
  *
  * <p>Changes this class cannot replay (removed source roots, changed resources, replaced attachments)
- * make the execution non-cacheable rather than being silently dropped. Changes it cannot see at all
+ * make the recorded state incomplete rather than being silently dropped. Changes it cannot see at all
  * (static fields, system properties, the session) are why descriptors exist: mojos known to make
  * them are marked non-cacheable.
  */
@@ -43,8 +43,6 @@ final class ProjectState {
      * ReactorProject, where its mojos hand values to later ones (the Service-Component header).
      */
     static final String CONTEXT_VALUE = "contextValue";
-    /** Not a project change: a file the execution wrote that an observed output covers (see Outputs#observed). */
-    static final String OUTPUT = "output";
 
     /** JVM and Maven runtime properties: they change for reasons unrelated to the mojo. */
     private static final java.util.List<String> JVM_PREFIXES = java.util.List.of(
@@ -115,8 +113,8 @@ final class ProjectState {
     }
 
     /** Normalized records that turn {@code this} into {@code after}. */
-    List<StateRecord> diff(ProjectState after, PathNormalizer n) throws NotCacheableException {
-        List<StateRecord> records = new ArrayList<>();
+    List<StateChange> diff(ProjectState after, PathNormalizer n) throws NotCacheableException {
+        List<StateChange> records = new ArrayList<>();
         diffRoots(COMPILE_SOURCE_ROOT, compileSourceRoots, after.compileSourceRoots, records, n);
         diffRoots(TEST_COMPILE_SOURCE_ROOT, testCompileSourceRoots, after.testCompileSourceRoots, records, n);
         if (!resources.equals(after.resources) || !testResources.equals(after.testResources)) {
@@ -133,15 +131,15 @@ final class ProjectState {
                 changed.put(k, v);
             }
         });
-        changed.forEach((k, v) -> records.add(new StateRecord(PROPERTY, k, n.normalize(v))));
+        changed.forEach((k, v) -> records.add(new StateChange(PROPERTY, k, n.normalize(v))));
         for (String k : properties.keySet()) {
             if (!after.properties.containsKey(k)) {
-                records.add(new StateRecord(PROPERTY_REMOVED, k, null));
+                records.add(new StateChange(PROPERTY_REMOVED, k, null));
             }
         }
         after.contextValues.forEach((k, v) -> {
             if (!Objects.equals(contextValues.get(k), v)) {
-                records.add(new StateRecord(CONTEXT_VALUE, k, n.normalize(v)));
+                records.add(new StateChange(CONTEXT_VALUE, k, n.normalize(v)));
             }
         });
         after.contextObjects.forEach((k, v) -> {
@@ -150,41 +148,41 @@ final class ProjectState {
             }
         });
         if (!Objects.equals(artifactFile, after.artifactFile)) {
-            records.add(new StateRecord(ARTIFACT_FILE, "", n.normalize(after.artifactFile)));
+            records.add(new StateChange(ARTIFACT_FILE, "", n.normalize(after.artifactFile)));
         }
         after.systemProperties.forEach((k, v) -> {
             if (!Objects.equals(systemProperties.get(k), v)) {
-                records.add(new StateRecord(SYSTEM_PROPERTY, k, n.normalize(v)));
+                records.add(new StateChange(SYSTEM_PROPERTY, k, n.normalize(v)));
             }
         });
         for (String k : systemProperties.keySet()) {
             if (!after.systemProperties.containsKey(k)) {
-                records.add(new StateRecord(SYSTEM_PROPERTY_REMOVED, k, null));
+                records.add(new StateChange(SYSTEM_PROPERTY_REMOVED, k, null));
             }
         }
         for (Map.Entry<String, String> e : after.attachedArtifacts.entrySet()) {
             if (!attachedArtifacts.containsKey(e.getKey())) {
-                records.add(new StateRecord(ATTACHED_ARTIFACT, e.getKey(), n.normalize(e.getValue())));
+                records.add(new StateChange(ATTACHED_ARTIFACT, e.getKey(), n.normalize(e.getValue())));
             }
         }
         return records;
     }
 
-    private static void diffRoots(String kind, List<String> before, List<String> after, List<StateRecord> out,
+    private static void diffRoots(String kind, List<String> before, List<String> after, List<StateChange> out,
                                   PathNormalizer n) throws NotCacheableException {
         if (!after.containsAll(before)) {
             throw new NotCacheableException("execution removed a " + kind);
         }
         for (String root : after) {
             if (!before.contains(root)) {
-                out.add(new StateRecord(kind, "", n.normalize(root)));
+                out.add(new StateChange(kind, "", n.normalize(root)));
             }
         }
     }
 
     /** Replays normalized records onto {@code project}. */
-    static void apply(List<StateRecord> records, MavenProject project, PathNormalizer n, MavenProjectHelper helper) {
-        for (StateRecord r : records) {
+    static void apply(List<StateChange> records, MavenProject project, PathNormalizer n, MavenProjectHelper helper) {
+        for (StateChange r : records) {
             String value = n.denormalize(r.value());
             switch (r.kind()) {
                 case COMPILE_SOURCE_ROOT -> project.addCompileSourceRoot(value);
@@ -196,14 +194,13 @@ final class ProjectState {
                 case SYSTEM_PROPERTY -> System.setProperty(r.name(), value);
                 case SYSTEM_PROPERTY_REMOVED -> System.clearProperty(r.name());
                 case CONTEXT_VALUE -> setContextValue(project, r.name(), value);
-                case OUTPUT -> { } // informational, for external caches
                 default -> throw new IllegalStateException("Unknown state record kind " + r.kind());
             }
         }
     }
 
     /** Whether {@code r}'s effect is (still) visible on {@code project}. */
-    static boolean holds(StateRecord r, MavenProject project, PathNormalizer n) {
+    static boolean holds(StateChange r, MavenProject project, PathNormalizer n) {
         String value = n.denormalize(r.value());
         return switch (r.kind()) {
             case COMPILE_SOURCE_ROOT -> project.getCompileSourceRoots().contains(value);

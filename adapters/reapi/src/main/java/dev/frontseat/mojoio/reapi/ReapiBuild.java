@@ -22,7 +22,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.google.longrunning.Operation;
 import com.google.protobuf.CodedInputStream;
 import com.google.protobuf.WireFormat;
-import dev.frontseat.mojoio.cache.AntPattern;
+import dev.frontseat.mojoio.spec.AntPattern;
 import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
 import java.io.IOException;
@@ -340,8 +340,8 @@ public final class ReapiBuild {
 
             String target = task.projectPath().isEmpty() ? "target" : task.projectPath() + "/target";
             List<String> maven = new ArrayList<>(List.of(options.maven(), "-B", "--no-transfer-progress", "-pl",
-                    projectList(project), "-am", "-Dmojoio.only=" + task.projectId(), "-Dmojoio.cache.enabled=false",
-                    "-Dmojoio.prerequisites=false", "-Dmojoio.fingerprint=" + fingerprint(task, project)));
+                    projectList(project), "-am", "-Dmojoio.only=" + task.projectId(),
+                    "-Dmojoio.fingerprint=" + fingerprint(task, project)));
             maven.addAll(options.mavenArgs());
             task.executions().forEach(e -> maven.add(e.get("invocation").asText()));
             // The action runs through a small shell wrapper ($0 is the target directory):

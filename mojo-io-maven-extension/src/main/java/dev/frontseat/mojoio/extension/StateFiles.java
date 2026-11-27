@@ -1,6 +1,5 @@
 package dev.frontseat.mojoio.extension;
 
-import dev.frontseat.mojoio.cache.CacheEntry;
 import dev.frontseat.mojoio.spec.StateChange;
 import dev.frontseat.mojoio.spec.StateFile;
 import java.io.IOException;
@@ -75,7 +74,7 @@ final class StateFiles {
 
     /** {@code groupId:artifactId:version:goal@executionId}. */
     static String executionId(MojoExecution m) {
-        return CacheKeyCalculator.mojoId(m) + "@" + m.getExecutionId();
+        return Fingerprint.mojoId(m) + "@" + m.getExecutionId();
     }
 
     /** The identity used to decide whether a recorded execution is part of the current plan. */
@@ -86,12 +85,29 @@ final class StateFiles {
         return gav.length == 4 ? gav[0] + ":" + gav[1] + ":" + gav[3] + "@" + at[1] : executionId;
     }
 
-    static void record(MavenProject project, MojoExecution m, List<CacheEntry.StateRecord> records,
-                       String incompleteReason, String phase) {
-        List<StateChange> changes = new ArrayList<>();
-        for (CacheEntry.StateRecord r : records) {
-            changes.add(new StateChange(r.kind(), r.name(), r.value()));
+    /** The lifecycle phase (Maven 4 tree) an execution is bound to, or {@code null}. */
+    static String phaseOf(MojoExecution m, MavenProject project, LifecycleModel model) {
+        String phase = m.getLifecyclePhase();
+        if (phase == null) {
+            // Invoked directly (goal@execution): the binding is in the project's model.
+            for (org.apache.maven.model.Plugin plugin : project.getBuildPlugins()) {
+                if (plugin.getGroupId().equals(m.getGroupId()) && plugin.getArtifactId().equals(m.getArtifactId())) {
+                    for (org.apache.maven.model.PluginExecution e : plugin.getExecutions()) {
+                        if (e.getId().equals(m.getExecutionId()) && e.getGoals().contains(m.getGoal())) {
+                            phase = e.getPhase();
+                        }
+                    }
+                }
+            }
         }
+        if (phase == null && m.getMojoDescriptor() != null) {
+            phase = m.getMojoDescriptor().getPhase();
+        }
+        return phase == null || phase.isBlank() ? null : model.treePhase(phase);
+    }
+
+    static void record(MavenProject project, MojoExecution m, List<StateChange> changes, String incompleteReason,
+                       String phase) {
         restoreDeleted(project);
         StateFile state = new StateFile(executionId(m), phase, changes, incompleteReason);
         state.write(file(project, m));
@@ -108,17 +124,17 @@ final class StateFiles {
      *         strategy once per lifecycle step, with partial plans), its diff misses what replay already
      *         applied, and the caller merges these back in.
      */
-    static java.util.Map<String, List<CacheEntry.StateRecord>> replayPending(MavenProject project,
+    static java.util.Map<String, List<StateChange>> replayPending(MavenProject project,
             Collection<MojoExecution> plan, PathNormalizer normalizer,
             org.apache.maven.project.MavenProjectHelper helper) {
         return replayPending(project, plan, normalizer, helper, state -> true);
     }
 
     /** As above, for the recorded executions {@code accept} lets through. */
-    static java.util.Map<String, List<CacheEntry.StateRecord>> replayPending(MavenProject project,
+    static java.util.Map<String, List<StateChange>> replayPending(MavenProject project,
             Collection<MojoExecution> plan, PathNormalizer normalizer,
             org.apache.maven.project.MavenProjectHelper helper, java.util.function.Predicate<StateFile> accept) {
-        java.util.Map<String, List<CacheEntry.StateRecord>> applied = new java.util.HashMap<>();
+        java.util.Map<String, List<StateChange>> applied = new java.util.HashMap<>();
         Path dir = directory(project);
         if (!Files.isDirectory(dir)) {
             return applied;
@@ -150,10 +166,9 @@ final class StateFiles {
                 continue;
             }
             Set<Path> missing = new LinkedHashSet<>();
-            List<CacheEntry.StateRecord> records = new ArrayList<>();
-            for (StateChange c : state.changes()) {
+            List<StateChange> records = state.changes();
+            for (StateChange c : records) {
                 missing.addAll(normalizer.missingRepositoryFiles(c.value()));
-                records.add(new CacheEntry.StateRecord(c.kind(), c.name(), c.value()));
             }
             if (!missing.isEmpty()) {
                 LOG.warn("[mojo-io] cannot replay {}: needs {}", state.execution(), missing);

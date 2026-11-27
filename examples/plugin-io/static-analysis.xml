@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
   Declarations for static-analysis checks: checkstyle:check, spotbugs:check, pmd:check.
-  Copy into a project's .mvn/plugin-io/ to cache them. Verified on Apache Commons Numbers
+  Copy into a project's .mvn/plugin-io/ to make them cacheable. Verified on Apache Commons Numbers
   (docs/real-projects.md): checkstyle 3.6.0, spotbugs-maven-plugin 4.10.4.0, maven-pmd-plugin 3.28.0.
 
   Not built in, because they only cover the files the plugin configuration points at directly.
@@ -9,12 +9,12 @@
   - files a configuration file refers to itself (a checkstyle.xml that loads a suppressions or header
     file through a property, a PMD ruleset that includes another ruleset file);
   - configuration loaded from a URL (its content is not hashed).
-  A hit also skips the console output of the check (warnings that do not fail the build).
+  A cache hit also skips the console output of the check (warnings that do not fail the build).
   Also not covered: checkstyle with skipExec=true (it then reads an earlier result file), and SpotBugs
   plugin lists or user preferences files.
 
-  To see what a declaration really hashes, read target/mojo-io/<plugin>-<goal>-<execution>.key.txt
-  after a build: an input that should list files but is empty is a gap.
+  To see what a declaration covers, export the task graph (-Dmojoio.graph.output=graph.json) and read
+  the execution's inputs: an input whose paths do not exist is a gap.
 -->
 <plugin-io xmlns="urn:mojo-io:plugin-io:1.0">
 
@@ -41,7 +41,7 @@
   </plugin>
 
   <plugin groupId="com.github.spotbugs" artifactId="spotbugs-maven-plugin">
-    <!-- check forks spotbugs:spotbugs: cached as one unit. -->
+    <!-- check forks spotbugs:spotbugs: one unit with it. -->
     <mojo goal="check">
       <outputs>
         <observed/>
@@ -64,7 +64,7 @@
   </plugin>
 
   <plugin groupId="org.apache.maven.plugins" artifactId="maven-pmd-plugin">
-    <!-- check forks pmd:pmd: cached as one unit. -->
+    <!-- check forks pmd:pmd: one unit with it. -->
     <mojo goal="check">
       <inputs>
         <files parameter="excludeFromFailureFile"/>
