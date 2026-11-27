@@ -37,8 +37,9 @@ components such as `LifecycleDependencyResolver` can be injected.
     component) makes the execution not cacheable unless the descriptor ignores that parameter. So
     the safe default is to run.
   - *Artifacts named in configuration* (annotation processor paths) count by version; a SNAPSHOT or
-    range makes the execution not cacheable. One built in this reactor is marked as such, and the
-    graph makes the task wait for that project's tasks.
+    range makes the execution not cacheable. One built in this reactor, with no version or the
+    reactor project's version, is marked as such, and the graph makes the task wait for that project's
+    tasks; another version of it (an API-compatibility baseline) counts by version.
 - **A task** (`-pl <id> -am -Dmojoio.only=<id> <invocations>`): projects not selected run nothing.
   The selected project first replays the recorded state of its upstream projects and of its own
   executions outside the invocation, then each execution runs. `ProjectState` is snapshotted around

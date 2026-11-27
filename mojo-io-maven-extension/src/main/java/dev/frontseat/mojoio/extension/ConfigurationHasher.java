@@ -19,8 +19,8 @@ import org.codehaus.plexus.util.xml.Xpp3Dom;
  * execution non-cacheable, unless the descriptor lists the parameter as ignored.
  *
  * <p>An artifact named by coordinates counts by its version, which must name fixed content. One built in
- * this reactor is marked as such instead: the task graph makes the execution's task depend on that
- * project's tasks, so the build system hashes its content.
+ * this reactor (no version, or the reactor project's version) is marked as such instead: the task graph
+ * makes the execution's task depend on that project's tasks, so the build system hashes its content.
  */
 final class ConfigurationHasher {
 
@@ -164,7 +164,7 @@ final class ConfigurationHasher {
         String version = getter(value, "getVersion");
         String type = getter(value, "getType");
         String classifier = getter(value, "getClassifier");
-        if (builtInReactor(ctx, groupId, artifactId)) {
+        if (builtInReactor(ctx, groupId, artifactId, version)) {
             return groupId + ":" + artifactId + ":" + (type == null ? "jar" : type) + ":"
                     + (classifier == null ? "" : classifier) + " " + BUILT_IN_REACTOR;
         }
@@ -202,7 +202,7 @@ final class ConfigurationHasher {
         String groupId = fields.get("groupId");
         String artifactId = fields.get("artifactId");
         String version = fields.get("version");
-        if (builtInReactor(ctx, groupId, artifactId)) {
+        if (builtInReactor(ctx, groupId, artifactId, version)) {
             fields.remove("version");
             fields.put("reactor", BUILT_IN_REACTOR);
             return fields.toString();
@@ -224,16 +224,19 @@ final class ConfigurationHasher {
     private static final String BUILT_IN_REACTOR = "built in this reactor";
 
     /**
-     * Whether a project of this build has these coordinates (an annotation processor, a build-tools module
-     * named in configuration): its version says nothing about its content.
+     * Whether these coordinates name a project of this build (an annotation processor, a build-tools module
+     * named in configuration): its version then says nothing about its content. A version other than the
+     * reactor project's names a released artifact instead (an API-compatibility baseline), whose version
+     * counts.
      */
-    private static boolean builtInReactor(ExecutionContext ctx, String groupId, String artifactId) {
+    private static boolean builtInReactor(ExecutionContext ctx, String groupId, String artifactId, String version) {
         if (ctx.session() == null || groupId == null || artifactId == null) {
             return false;
         }
+        boolean unversioned = version == null || version.isBlank() || "null".equals(version);
         for (org.apache.maven.project.MavenProject p : ctx.session().getAllProjects()) {
             if (p.getGroupId().equals(groupId) && p.getArtifactId().equals(artifactId)) {
-                return true;
+                return unversioned || version.equals(p.getVersion());
             }
         }
         return false;

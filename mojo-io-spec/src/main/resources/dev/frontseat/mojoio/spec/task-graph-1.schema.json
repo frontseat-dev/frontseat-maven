@@ -105,7 +105,7 @@
       "properties": {
         "name": { "type": "string" },
         "path": { "type": "string", "description": "A file, or a directory narrowed by includes/excludes." },
-        "observed": { "type": "boolean", "description": "Known only after the run: the exact files are listed as `output` records in the stateFile." },
+        "observed": { "type": "boolean", "description": "Known only after the run: the build system stores what the execution wrote under this path." },
         "includes": { "type": "array", "items": { "type": "string" } },
         "excludes": { "type": "array", "items": { "type": "string" } }
       }

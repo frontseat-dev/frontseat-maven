@@ -43,8 +43,8 @@
       <!-- Comma or whitespace separated parameters that cannot affect outputs. -->
       <xs:element name="ignoredParameters" type="xs:string" minOccurs="0"/>
       <!-- Comma or whitespace separated Ant patterns, relative to the project build directory, for
-           files the mojo writes that are bookkeeping, not outputs (e.g. maven-status/**). Strict mode
-           reports any other write outside the declared outputs. -->
+           files the mojo writes that are bookkeeping, not outputs (e.g. maven-status/**). A build system's
+           write check treats any other write outside the declared outputs as undeclared. -->
       <xs:element name="ignoredWrites" type="xs:string" minOccurs="0"/>
     </xs:sequence>
     <xs:attribute name="goal" type="xs:string" use="required"/>

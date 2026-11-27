@@ -222,7 +222,7 @@ function targetsFor(project, graph, names, options) {
           continue;
         }
         // Known only after the run: everything written in the build directory, minus what other tasks
-        // of the project declare (the exact list is also in the state file).
+        // of the project declare.
         outputs.push(`${nxPath(o.path)}/**/*`);
         for (const [name, globsOfOther] of Object.entries(allDeclared)) {
           if (name !== task.name) outputs.push(...globsOfOther.map((g) => `!${g}`));
