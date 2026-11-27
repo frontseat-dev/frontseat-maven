@@ -40,6 +40,9 @@ public class TaskGraphCollector {
 
     private static final Logger LOG = LoggerFactory.getLogger(TaskGraphCollector.class);
 
+    /** What Maven itself writes in a build directory while a mojo runs (Maven 4's consumer pom). */
+    static final List<String> MAVEN_WRITES = List.of("consumer-*.pom");
+
     private final DescriptorRegistry registry;
     private final RuntimeInformation runtime;
     private final DependencyResolution dependencies;
@@ -229,7 +232,7 @@ public class TaskGraphCollector {
         e.put("stamping", descriptor.map(d -> d.stampingCarry() ? "carry" : "exact").orElse("exact"));
         // Bookkeeping the execution (or Maven itself) writes in the build directory: not outputs. Build
         // systems must leave these out of observed outputs, or they make hashes unstable.
-        List<String> ignoredWrites = new ArrayList<>(WriteSnapshot.MAVEN_WRITES);
+        List<String> ignoredWrites = new ArrayList<>(MAVEN_WRITES);
         descriptor.ifPresent(d -> ignoredWrites.addAll(d.ignoredWrites()));
         e.put("ignoredWrites", ignoredWrites);
 
@@ -298,7 +301,7 @@ public class TaskGraphCollector {
         o.put("includes", out.includes());
         o.put("excludes", out.excludes());
         if (out.observed()) {
-            // Known only after the run: the exact files are listed as `output` records in the stateFile.
+            // Known only after the run: whatever the execution writes there.
             o.put("observed", true);
         }
         return o;

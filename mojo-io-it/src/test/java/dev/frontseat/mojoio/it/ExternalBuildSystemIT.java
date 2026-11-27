@@ -35,7 +35,7 @@ class ExternalBuildSystemIT {
         assertTrue(warm.stream().allMatch(ReferenceBuildSystem.Outcome::hit), warm.toString());
         assertTrue(Files.isRegularFile(b.dir().resolve("lib-core/target/classes/sample/core/Greeter.class")));
         assertTrue(Files.isRegularFile(b.dir().resolve("app/target/surefire-reports/TEST-sample.app.AppTest.xml")));
-        // Written by JaCoCo's agent inside the test JVM: an observed output, listed in the state file.
+        // Written by JaCoCo's agent inside the test JVM: an observed output.
         assertTrue(Files.isRegularFile(b.dir().resolve("lib-core/target/jacoco.exec")), "observed output restored");
 
         // Change one test: only that project's test-compile and test run, against restored upstream

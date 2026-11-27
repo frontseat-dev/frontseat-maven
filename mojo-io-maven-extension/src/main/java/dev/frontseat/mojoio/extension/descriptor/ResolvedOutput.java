@@ -23,19 +23,9 @@ public record ResolvedOutput(String name, Path path, List<String> includes, List
         this(name, path, includes, excludes, false);
     }
 
-    /** Whether {@code file} falls under this output's path and patterns. */
-    public boolean covers(Path file) {
-        Path p = path.toAbsolutePath().normalize();
-        Path f = file.toAbsolutePath().normalize();
-        if (f.equals(p)) {
-            return true;
-        }
-        return f.startsWith(p) && AntPattern.selected(FileTrees.relative(p, f), includes, excludes);
-    }
-
     /**
      * The files this output covers right now. Empty for an observed output: what it covers is known
-     * only from what the mojo wrote (see WriteSnapshot).
+     * only from what the mojo wrote.
      */
     public List<Path> existingFiles() {
         if (observed) {

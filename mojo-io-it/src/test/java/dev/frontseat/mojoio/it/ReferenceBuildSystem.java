@@ -13,23 +13,28 @@ import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Stream;
 
 /**
  * A minimal, Nx-shaped build system that caches Maven work using nothing but mojo-io's public
  * contract: the task graph ({@code mojo-io-task-graph} v1), the state files it names, and running one
- * task with {@code -pl <id> -am -Dmojoio.only=<id> <invocations>}. mojo-io's own cache stays off.
+ * task with {@code -pl <id> -am -Dmojoio.only=<id> <invocations>}.
  *
  * <ul>
- *   <li>a task = the executions of one project bound to one phase, or sharing a {@code runTogether}
- *       group (a phase with its pre-/post- or before:/after: hooks);</li>
  *   <li>tasks and their dependencies come ready-made from the graph ({@code tasks}: runTogether groups,
  *       Maven 4 phase links), so e.g. app's compile depends on lib-core's compile, not its tests;</li>
  *   <li>task hash = fingerprints + declared file inputs + poms + external dependencies + the hashes of the
  *       tasks it depends on;</li>
- *   <li>hit = copy the stored outputs and state files back; miss = run the task, store them.</li>
+ *   <li>a task runs in a fresh sandbox: the checkout without any {@code target/}, plus the outputs of the
+ *       tasks it depends on, transitively. Afterwards the sandbox is diffed: every file a cacheable task
+ *       wrote must be a declared output, under an observed output, an ignored write or one of its state
+ *       files, or the task fails;</li>
+ *   <li>hit = copy the stored outputs into the checkout; miss = run the task, store its outputs and copy
+ *       them into the checkout.</li>
  * </ul>
  */
 final class ReferenceBuildSystem {
@@ -52,6 +57,7 @@ final class ReferenceBuildSystem {
     private final Path cache;
     private final boolean respectRunTogether;
     private final String granularity;
+    private int sandboxes;
 
     ReferenceBuildSystem(MavenBuild maven, Path cache) {
         this(maven, cache, true);
@@ -80,60 +86,167 @@ final class ReferenceBuildSystem {
         JsonNode graph = new ObjectMapper().readTree(root.resolve("graph.json").toFile());
 
         Map<String, String> taskHashes = new LinkedHashMap<>();
+        Map<String, List<String>> taskDependsOn = new LinkedHashMap<>();
+        // Where each task's outputs are, for the sandboxes of the tasks after it.
+        Map<String, Path> taskOutputs = new LinkedHashMap<>();
         List<Outcome> outcomes = new ArrayList<>();
         for (JsonNode project : referencedFirst(graph)) {
             String id = project.get("id").asText();
             for (Task task : tasks(project)) {
-                Path dir = root.resolve(task.path());
+                Path dir = root.resolve(task.path()).normalize();
                 StringBuilder upstream = new StringBuilder();
                 for (String dep : task.dependsOn()) {
                     upstream.append(dep).append('=').append(taskHashes.get(dep)).append(';');
                 }
                 String hash = hash(task, project, dir, upstream.toString());
+                taskHashes.put(task.id(), hash);
+                taskDependsOn.put(task.id(), task.dependsOn());
                 boolean cacheable = task.executions().stream().allMatch(e -> e.get("cacheable").asBoolean());
                 Path entry = cache.resolve(hash);
                 if (cacheable && Files.isDirectory(entry)) {
-                    copyTree(entry, dir);
+                    copyTree(entry, root);
+                    taskOutputs.put(task.id(), entry);
                     outcomes.add(new Outcome(task.id(), true));
-                } else {
-                    List<String> projects = new ArrayList<>(List.of(id));
-                    project.path("reactorReferences").forEach(r -> projects.add(r.asText()));
-                    List<String> args = new ArrayList<>(List.of("-pl", String.join(",", projects), "-am",
-                            "-Dmojoio.only=" + id,
-                            "-Dmojoio.cache.enabled=false", "-Dmojoio.prerequisites=false"));
-                    task.executions().forEach(e -> args.add(e.get("invocation").asText()));
-                    MavenBuild.Result result = maven.runAllowingFailure(args.toArray(String[]::new));
-                    if (result.exitCode() != 0) {
-                        throw new TaskFailed(task.id(), result.log());
-                    }
-                    if (cacheable) {
-                        store(task, dir, entry);
-                    }
-                    outcomes.add(new Outcome(task.id(), false));
+                    continue;
                 }
-                taskHashes.put(task.id(), hash);
+                Path sandbox = sandbox(task, taskDependsOn, taskOutputs);
+                Map<Path, String> before = snapshot(sandbox);
+                List<String> projects = new ArrayList<>(List.of(id));
+                project.path("reactorReferences").forEach(r -> projects.add(r.asText()));
+                List<String> args = new ArrayList<>(List.of("-pl", String.join(",", projects), "-am",
+                        "-Dmojoio.only=" + id, "-Dmojoio.cache.enabled=false", "-Dmojoio.prerequisites=false"));
+                task.executions().forEach(e -> args.add(e.get("invocation").asText()));
+                MavenBuild.Result result = maven.at(sandbox).runAllowingFailure(args.toArray(String[]::new));
+                if (result.exitCode() != 0) {
+                    throw new TaskFailed(task.id(), result.log());
+                }
+                Path outputs = cacheable ? entry : cache.resolveSibling(cache.getFileName() + "-uncacheable").resolve(hash);
+                store(task, sandbox, before, cacheable, outputs);
+                copyTree(outputs, root);
+                taskOutputs.put(task.id(), outputs);
+                outcomes.add(new Outcome(task.id(), false));
             }
         }
         return outcomes;
     }
 
+    /** A fresh input root: the checkout without its build directories, plus the outputs of the tasks it depends on. */
+    private Path sandbox(Task task, Map<String, List<String>> dependsOn, Map<String, Path> outputs) throws IOException {
+        Path sandbox = cache.resolveSibling(cache.getFileName() + "-sandboxes").resolve(String.valueOf(++sandboxes));
+        MavenBuild.deleteTree(sandbox);
+        try (Stream<Path> s = Files.walk(root)) {
+            for (Path f : s.filter(Files::isRegularFile).toList()) {
+                Path rel = root.relativize(f);
+                boolean built = false;
+                for (Path part : rel) {
+                    built |= part.toString().equals("target");
+                }
+                if (!built && !rel.toString().equals("graph.json")) {
+                    copy(f, sandbox.resolve(rel));
+                }
+            }
+        }
+        Set<String> upstream = new LinkedHashSet<>();
+        List<String> queue = new ArrayList<>(task.dependsOn());
+        while (!queue.isEmpty()) {
+            String t = queue.remove(0);
+            if (upstream.add(t)) {
+                queue.addAll(dependsOn.getOrDefault(t, List.of()));
+            }
+        }
+        for (String t : upstream) {
+            copyTree(outputs.get(t), sandbox);
+        }
+        return sandbox;
+    }
+
     /**
-     * The graph's ready-made tasks (runTogether groups, Maven 4 phase links as dependsOn). The control
-     * mode splits each task into one task per phase, chained, as a naive orchestrator would.
+     * Copies what the task wrote in {@code sandbox} to {@code entry}. Every write of a cacheable task must be
+     * declared; an uncacheable task's writes are all kept, for the tasks after it.
      */
+    private void store(Task task, Path sandbox, Map<Path, String> before, boolean cacheable, Path entry)
+            throws IOException {
+        Path dir = sandbox.resolve(task.path()).normalize();
+        Path buildDir = dir.resolve("target");
+        Path tmp = entry.resolveSibling(entry.getFileName() + ".tmp");
+        MavenBuild.deleteTree(tmp);
+        Files.createDirectories(tmp);
+        List<String> undeclared = new ArrayList<>();
+        for (Map.Entry<Path, String> f : snapshot(sandbox).entrySet()) {
+            if (f.getValue().equals(before.get(f.getKey())) || ignored(task, buildDir, f.getKey())) {
+                continue;
+            }
+            if (!cacheable || declared(task, dir, f.getKey())) {
+                copy(f.getKey(), tmp.resolve(sandbox.relativize(f.getKey())));
+            } else {
+                undeclared.add(sandbox.relativize(f.getKey()).toString());
+            }
+        }
+        if (!undeclared.isEmpty()) {
+            throw new TaskFailed(task.id(), "wrote files outside its declared outputs: " + undeclared);
+        }
+        MavenBuild.deleteTree(entry);
+        Files.createDirectories(entry.getParent());
+        Files.move(tmp, entry, StandardCopyOption.REPLACE_EXISTING);
+    }
+
+    /** A state file of the task's executions, or under one of their declared or observed outputs. */
+    private boolean declared(Task task, Path dir, Path f) {
+        for (JsonNode e : task.executions()) {
+            if (f.equals(resolve(e.get("stateFile").asText(), dir))) {
+                return true;
+            }
+            for (JsonNode out : e.get("outputs")) {
+                Path p = resolve(out.get("path").asText(), dir);
+                if (f.equals(p) || f.startsWith(p) && AntPattern.selected(relative(p, f),
+                        texts(out.get("includes")), texts(out.get("excludes")))) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /** Bookkeeping the graph says is no output: an ignored write (relative to the build directory). */
+    private static boolean ignored(Task task, Path buildDir, Path f) {
+        if (!f.startsWith(buildDir)) {
+            return false;
+        }
+        String rel = relative(buildDir, f);
+        for (JsonNode e : task.executions()) {
+            for (String pattern : texts(e.get("ignoredWrites"))) {
+                if (AntPattern.compile(pattern).matches(rel)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /** Size and modification time of every file under {@code dir}. */
+    private static Map<Path, String> snapshot(Path dir) throws IOException {
+        Map<Path, String> files = new LinkedHashMap<>();
+        try (Stream<Path> s = Files.walk(dir)) {
+            for (Path f : s.filter(Files::isRegularFile).sorted().toList()) {
+                files.put(f, Files.size(f) + ":" + Files.getLastModifiedTime(f).toMillis());
+            }
+        }
+        return files;
+    }
+
     /** The graph's projects, each after the reactor projects it references (Maven's order does not know them all). */
     private static List<JsonNode> referencedFirst(JsonNode graph) {
         Map<String, JsonNode> byId = new LinkedHashMap<>();
         graph.get("projects").forEach(p -> byId.put(p.get("id").asText(), p));
         List<JsonNode> order = new ArrayList<>();
-        java.util.Set<String> visited = new java.util.HashSet<>();
+        Set<String> visited = new java.util.HashSet<>();
         for (String id : byId.keySet()) {
             visit(id, byId, visited, order);
         }
         return order;
     }
 
-    private static void visit(String id, Map<String, JsonNode> byId, java.util.Set<String> visited, List<JsonNode> order) {
+    private static void visit(String id, Map<String, JsonNode> byId, Set<String> visited, List<JsonNode> order) {
         JsonNode p = byId.get(id);
         if (p == null || !visited.add(id)) {
             return;
@@ -142,6 +255,10 @@ final class ReferenceBuildSystem {
         order.add(p);
     }
 
+    /**
+     * The graph's ready-made tasks (runTogether groups, Maven 4 phase links as dependsOn). The control
+     * mode splits each task into one task per phase, chained, as a naive orchestrator would.
+     */
     private List<Task> tasks(JsonNode project) {
         Map<String, JsonNode> executions = new LinkedHashMap<>();
         project.get("executions").forEach(e -> executions.put(e.get("id").asText(), e));
@@ -171,9 +288,9 @@ final class ReferenceBuildSystem {
             sb.append("|pom=").append(contentHash(resolve(pom.asText(), dir), List.of(), List.of()));
         }
         sb.append("|ext=").append(project.get("externalDependencies"));
-        // What earlier members of the task produce is not an input of the task: it does not exist yet
-        // when the task is hashed on a fresh checkout.
-        List<Path> producedInTask = new ArrayList<>();
+        // Build outputs are not hashed as files: they do not exist yet when the task is hashed on a fresh
+        // checkout, and the hashes of the tasks that make them stand for them.
+        Path buildDir = dir.resolve("target");
         for (JsonNode e : task.executions()) {
             sb.append("|exec=").append(e.get("invocation").asText()).append(' ').append(e.get("fingerprint"));
             for (JsonNode in : e.get("inputs")) {
@@ -181,7 +298,7 @@ final class ReferenceBuildSystem {
                     case "files" -> {
                         for (JsonNode p : in.get("paths")) {
                             Path path = resolve(p.asText(), dir);
-                            if (producedInTask.stream().anyMatch(path::startsWith)) {
+                            if (path.startsWith(buildDir)) {
                                 continue;
                             }
                             sb.append("|f=").append(contentHash(path, texts(in.get("includes")),
@@ -192,43 +309,8 @@ final class ReferenceBuildSystem {
                     default -> sb.append("|v=").append(in.get("value"));
                 }
             }
-            for (JsonNode out : e.get("outputs")) {
-                producedInTask.add(resolve(out.get("path").asText(), dir));
-            }
         }
         return sha256(sb.toString().getBytes(StandardCharsets.UTF_8));
-    }
-
-    private void store(Task task, Path dir, Path entry) throws IOException {
-        Path tmp = entry.resolveSibling(entry.getFileName() + ".tmp");
-        for (JsonNode e : task.executions()) {
-            Path state = resolve(e.get("stateFile").asText(), dir);
-            for (JsonNode out : e.get("outputs")) {
-                if (out.path("observed").asBoolean(false)) {
-                    // Known only now: the state file lists exactly what was written.
-                    if (Files.isRegularFile(state)) {
-                        for (dev.frontseat.mojoio.spec.StateChange c : dev.frontseat.mojoio.spec.StateFile.read(state).changes()) {
-                            if (c.kind().equals("output")) {
-                                Path f = Path.of(c.value().replace("@@BASEDIR@@", dir.toString()));
-                                if (Files.isRegularFile(f)) {
-                                    copy(f, tmp.resolve(dir.relativize(f)));
-                                }
-                            }
-                        }
-                    }
-                    continue;
-                }
-                Path p = resolve(out.get("path").asText(), dir);
-                for (Path f : files(p, texts(out.get("includes")), texts(out.get("excludes")))) {
-                    copy(f, tmp.resolve(dir.relativize(f)));
-                }
-            }
-            if (Files.isRegularFile(state)) {
-                copy(state, tmp.resolve(dir.relativize(state)));
-            }
-        }
-        Files.createDirectories(tmp);
-        Files.move(tmp, entry, StandardCopyOption.REPLACE_EXISTING);
     }
 
     private Path resolve(String path, Path projectDir) {
@@ -236,10 +318,14 @@ final class ReferenceBuildSystem {
                 .replace("{workspaceRoot}", root.toString())).normalize();
     }
 
+    private static String relative(Path base, Path f) {
+        return base.relativize(f).toString().replace('\\', '/');
+    }
+
     private static String contentHash(Path p, List<String> includes, List<String> excludes) throws IOException {
         StringBuilder sb = new StringBuilder();
         for (Path f : files(p, includes, excludes)) {
-            sb.append(p.relativize(f)).append('=').append(sha256(Files.readAllBytes(f))).append(';');
+            sb.append(relative(p, f)).append('=').append(sha256(Files.readAllBytes(f))).append(';');
         }
         return sb.length() == 0 ? "absent" : sha256(sb.toString().getBytes(StandardCharsets.UTF_8));
     }
@@ -253,7 +339,7 @@ final class ReferenceBuildSystem {
         }
         try (Stream<Path> s = Files.walk(p)) {
             return s.filter(Files::isRegularFile)
-                    .filter(f -> AntPattern.selected(p.relativize(f).toString().replace('\\', '/'), includes, excludes))
+                    .filter(f -> AntPattern.selected(relative(p, f), includes, excludes))
                     .sorted().toList();
         }
     }

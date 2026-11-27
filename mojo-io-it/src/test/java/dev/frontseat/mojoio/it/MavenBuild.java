@@ -76,6 +76,11 @@ final class MavenBuild {
         return projectDir;
     }
 
+    /** The same Maven, run in {@code dir} instead (a build system's sandbox). */
+    MavenBuild at(Path dir) {
+        return new MavenBuild(dir, cacheDir);
+    }
+
     Result run(String... goals) {
         Result result = runAllowingFailure(goals);
         if (result.exitCode() != 0) {

@@ -73,17 +73,9 @@ public class MojoIoExecutionStrategy implements MojosExecutionStrategy {
     private final Map<MavenSession, Map<String, Map<String, List<CacheEntry.StateRecord>>>> replayedState =
             Collections.synchronizedMap(new WeakHashMap<>());
 
-    /**
-     * Per build and project: how many executions ran, and the snapshot taken after the last one that took
-     * one. If the next execution is declared too, that snapshot is its "before": nothing ran in between.
-     * Halves the directory walks of strict mode and observed outputs.
-     */
+    /** Per build and project: the executions that ran or were restored in this build, never replayed. */
     private static final class ProjectRun {
-        int executions;
-        /** Identities of the executions that ran or were restored in this build: never replayed. */
         final Set<String> executed = java.util.concurrent.ConcurrentHashMap.newKeySet();
-        int snapshotAt = -1;
-        WriteSnapshot snapshot;
     }
 
     private final Map<MavenSession, Map<String, ProjectRun>> runs = Collections.synchronizedMap(new WeakHashMap<>());
@@ -235,7 +227,6 @@ public class MojoIoExecutionStrategy implements MojosExecutionStrategy {
             throws LifecycleExecutionException {
         String label = label(m, project);
         ProjectRun projectRun = run(session, project);
-        int sequence = ++projectRun.executions;
         projectRun.executed.add(StateFiles.identity(StateFiles.executionId(m)));
         Optional<MojoCacheDescriptor> descriptor = registry.find(m, session)
                 .map(d -> ForkedGoals.merge(m, project, session, registry, d));
@@ -268,18 +259,6 @@ public class MojoIoExecutionStrategy implements MojosExecutionStrategy {
             }
         }
 
-        boolean declared = descriptor.isPresent() && structuralReason(m, descriptor.get()) == null;
-        boolean strict = config.strict() != MojoIoConfig.Strict.OFF && declared;
-        boolean observing = declared && resolvedOutputs(ctx, descriptor.get()).stream().anyMatch(ResolvedOutput::observed);
-        WriteSnapshot snapshot = null;
-        if (strict || observing) {
-            if (strict && config.cleanOutputs()) {
-                cleanDeclaredOutputs(ctx, descriptor.get(), label);
-            }
-            snapshot = projectRun.snapshotAt == sequence - 1 && projectRun.snapshot != null
-                    && !(strict && config.cleanOutputs())
-                    ? projectRun.snapshot : WriteSnapshot.take(session, project);
-        }
         // System properties are JVM-wide: with modules building in parallel (-T, mvnd) another module's
         // change would be attributed to this mojo, so they are only tracked in sequential builds.
         boolean trackSystemProperties = !session.isParallel();
@@ -293,47 +272,13 @@ public class MojoIoExecutionStrategy implements MojosExecutionStrategy {
         } catch (NotCacheableException e) {
             incomplete = e.getMessage();
         }
-        Set<Path> changed = Set.of();
-        if (snapshot != null) {
-            WriteSnapshot after = WriteSnapshot.take(session, project);
-            changed = snapshot.changedSince(after);
-            projectRun.snapshot = after;
-            projectRun.snapshotAt = sequence;
-        }
-        List<Path> observed = List.of();
-        if (observing) {
-            Path buildDirectory = Path.of(project.getBuild().getDirectory()).toAbsolutePath().normalize();
-            observed = WriteSnapshot.observedFiles(changed, resolvedOutputs(ctx, descriptor.get()), buildDirectory,
-                    descriptor.get().ignoredWrites());
-            if (state != null) {
-                state = new ArrayList<>(state);
-                for (Path f : observed) {
-                    // Informational record: tells external caches exactly which files to store.
-                    state.add(new CacheEntry.StateRecord(ProjectState.OUTPUT, "", normalizer.normalize(f.toString())));
-                }
-            }
-        }
         if (config.state()) {
             StateFiles.record(project, m, state == null ? List.of() : state, incomplete,
                     UpstreamState.phaseOf(m, project, lifecycle(session)));
         }
-        String undeclared = strict ? checkWrites(m, ctx, descriptor.get(), snapshot, changed, config, label) : null;
         if (key != null) {
-            store(m, ctx, normalizer.stamps(), cache, config, descriptor.get(), key, state,
-                    incomplete != null ? incomplete : undeclared, label, observed);
+            store(m, ctx, normalizer.stamps(), cache, config, descriptor.get(), key, state, incomplete, label);
         }
-    }
-
-    private static List<ResolvedOutput> resolvedOutputs(ExecutionContext ctx, MojoCacheDescriptor descriptor) {
-        List<ResolvedOutput> outputs = new ArrayList<>();
-        try {
-            for (OutputSpec spec : descriptor.outputs()) {
-                outputs.addAll(spec.resolve(ctx));
-            }
-        } catch (NotCacheableException | RuntimeException e) {
-            LOG.debug(PREFIX + "cannot resolve outputs of {}", ctx.execution(), e);
-        }
-        return outputs;
     }
 
     /**
@@ -359,63 +304,6 @@ public class MojoIoExecutionStrategy implements MojosExecutionStrategy {
             }
         }
         return merged;
-    }
-
-    /**
-     * Strict mode: files the mojo wrote outside its declared outputs mean a cache entry would be
-     * incomplete. Returns a reason not to store (or {@code null}); in {@code fail} mode, fails the build.
-     */
-    private String checkWrites(MojoExecution m, ExecutionContext ctx, MojoCacheDescriptor descriptor,
-                               WriteSnapshot snapshot, Set<Path> changed, MojoIoConfig config, String label)
-            throws LifecycleExecutionException {
-        List<String> undeclared;
-        try {
-            List<ResolvedOutput> outputs = new ArrayList<>();
-            for (OutputSpec spec : descriptor.outputs()) {
-                outputs.addAll(spec.resolve(ctx));
-            }
-            Path buildDirectory = Path.of(ctx.project().getBuild().getDirectory()).toAbsolutePath().normalize();
-            undeclared = WriteSnapshot.undeclared(changed, outputs, buildDirectory,
-                    descriptor.ignoredWrites(), snapshot.basedir());
-        } catch (NotCacheableException | RuntimeException e) {
-            LOG.debug(PREFIX + "cannot check writes of {}", label, e);
-            return null;
-        }
-        if (undeclared.isEmpty()) {
-            return null;
-        }
-        String files = (undeclared.size() > 10 ? undeclared.subList(0, 10) + " and " + (undeclared.size() - 10)
-                + " more" : undeclared.toString());
-        String message = label + " wrote " + undeclared.size() + " file(s) outside its declared outputs ("
-                + descriptor.source() + "): " + files;
-        if (config.strict() == MojoIoConfig.Strict.FAIL) {
-            throw new LifecycleExecutionException("[mojo-io] UNDECLARED " + message
-                    + ". Fix the plugin-io declaration, or run with -Dmojoio.strict=warn.", m, ctx.project());
-        }
-        LOG.warn(PREFIX + "UNDECLARED {}", message);
-        return "undeclared writes";
-    }
-
-    /** Strict mode with cleanOutputs: no leftover from an earlier build can end up in a new entry. */
-    private void cleanDeclaredOutputs(ExecutionContext ctx, MojoCacheDescriptor descriptor, String label) {
-        int deleted = 0;
-        try {
-            for (OutputSpec spec : descriptor.outputs()) {
-                for (ResolvedOutput output : spec.resolve(ctx)) {
-                    for (Path f : output.existingFiles()) {
-                        if (f.toAbsolutePath().normalize().startsWith(ctx.basedir())) {
-                            java.nio.file.Files.deleteIfExists(f);
-                            deleted++;
-                        }
-                    }
-                }
-            }
-        } catch (NotCacheableException | java.io.IOException | RuntimeException e) {
-            LOG.debug(PREFIX + "cannot clean outputs of {}", label, e);
-        }
-        if (deleted > 0) {
-            LOG.debug(PREFIX + "cleaned {} declared output(s) of {}", deleted, label);
-        }
     }
 
     /** The cache key, or {@code null} (with a log line) when the execution cannot be cached. */
@@ -453,7 +341,7 @@ public class MojoIoExecutionStrategy implements MojosExecutionStrategy {
 
     private void store(MojoExecution m, ExecutionContext ctx, Stamps stamps, LocalCache cache, MojoIoConfig config,
                        MojoCacheDescriptor descriptor, CacheKey key, List<CacheEntry.StateRecord> state,
-                       String incomplete, String label, List<Path> observed) {
+                       String incomplete, String label) {
         String hash = key.hash();
         if (!config.write()) {
             LOG.info(PREFIX + "MISS  {} [{}] (cache writes disabled)", label, shortHash(hash));
@@ -467,13 +355,6 @@ public class MojoIoExecutionStrategy implements MojosExecutionStrategy {
             Map<String, Path> outputs = new TreeMap<>();
             List<LocalCache.StoredFile> files = new ArrayList<>();
             String unstampable = null;
-            for (Path f : observed) {
-                Path abs = f.toAbsolutePath().normalize();
-                if (!abs.startsWith(ctx.basedir())) {
-                    throw new NotCacheableException("output " + abs + " is outside the project directory");
-                }
-                outputs.put(FileTrees.relative(ctx.basedir(), abs), abs);
-            }
             for (OutputSpec spec : descriptor.outputs()) {
                 for (ResolvedOutput output : spec.resolve(ctx)) {
                     for (Path file : output.existingFiles()) {

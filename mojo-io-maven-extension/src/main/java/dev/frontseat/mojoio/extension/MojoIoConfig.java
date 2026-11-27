@@ -22,11 +22,6 @@ import org.apache.maven.execution.MavenSession;
  *   <li>{@code mojoio.cache.enabled} (default {@code true}): the built-in local cache.</li>
  *   <li>{@code mojoio.cache.dir} (default {@code ~/.m2/mojo-io-cache}),
  *       {@code mojoio.cache.read} / {@code mojoio.cache.write} (default {@code true}).</li>
- *   <li>{@code mojoio.strict} ({@code off}, {@code warn} (default), {@code fail}): report files a declared
- *       mojo writes outside its declared outputs; such executions are never stored, and {@code fail}
- *       fails the build.</li>
- *   <li>{@code mojoio.strict.cleanOutputs} (default {@code false}): delete declared outputs before a
- *       declared mojo runs, so leftovers (e.g. classes of deleted sources) never reach an entry.</li>
  *   <li>{@code mojoio.only} (default unset): comma-separated project ids ({@code groupId:artifactId} or
  *       {@code artifactId}). Other projects in the reactor replay their state but run no mojos, so
  *       {@code -pl app -am -Dmojoio.only=app} builds only {@code app} against its upstream modules'
@@ -36,10 +31,8 @@ import org.apache.maven.execution.MavenSession;
  * </ul>
  */
 public record MojoIoConfig(boolean enabled, boolean state, Path graphOutput, boolean cache, Path cacheDir,
-                           boolean read, boolean write, boolean prerequisites, Strict strict, boolean cleanOutputs,
+                           boolean read, boolean write, boolean prerequisites,
                            java.util.Set<String> only, Granularity granularity) {
-
-    public enum Strict { OFF, WARN, FAIL }
 
     /** How the task graph groups a project's executions into tasks. */
     public enum Granularity { PHASE, STAGE, MODULE }
@@ -67,8 +60,6 @@ public record MojoIoConfig(boolean enabled, boolean state, Path graphOutput, boo
                 bool(user, system, "mojoio.cache.read", true),
                 bool(user, system, "mojoio.cache.write", true),
                 bool(user, system, "mojoio.prerequisites", true),
-                Strict.valueOf(get(user, system, "mojoio.strict", "warn").toUpperCase(java.util.Locale.ROOT)),
-                bool(user, system, "mojoio.strict.cleanOutputs", false),
                 java.util.Set.of(get(user, system, "mojoio.only", "").split("\\s*,\\s*")).stream()
                         .filter(x -> !x.isBlank()).collect(java.util.stream.Collectors.toUnmodifiableSet()),
                 Granularity.valueOf(get(user, system, "mojoio.graph.granularity", "stage").toUpperCase(java.util.Locale.ROOT)));

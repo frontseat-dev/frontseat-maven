@@ -43,8 +43,6 @@ final class ProjectState {
      * ReactorProject, where its mojos hand values to later ones (the Service-Component header).
      */
     static final String CONTEXT_VALUE = "contextValue";
-    /** Not a project change: a file the execution wrote that an observed output covers (see Outputs#observed). */
-    static final String OUTPUT = "output";
 
     /** JVM and Maven runtime properties: they change for reasons unrelated to the mojo. */
     private static final java.util.List<String> JVM_PREFIXES = java.util.List.of(
@@ -196,7 +194,6 @@ final class ProjectState {
                 case SYSTEM_PROPERTY -> System.setProperty(r.name(), value);
                 case SYSTEM_PROPERTY_REMOVED -> System.clearProperty(r.name());
                 case CONTEXT_VALUE -> setContextValue(project, r.name(), value);
-                case OUTPUT -> { } // informational, for external caches
                 default -> throw new IllegalStateException("Unknown state record kind " + r.kind());
             }
         }
