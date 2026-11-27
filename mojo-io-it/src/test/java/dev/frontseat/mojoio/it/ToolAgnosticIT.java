@@ -107,6 +107,35 @@ class ToolAgnosticIT {
         assertNotEquals("", graph.get("maven").asText());
     }
 
+    /**
+     * A build system that runs tasks in a shared workspace (Nx without a sandbox) keeps outputs of earlier
+     * builds. Here lib-core's jar and its recorded state are older than its freshly compiled classes. A
+     * task may only rely on the upstream state it depends on: app's compile needs lib-core "ready" (its
+     * classes), so it must not pick up the old jar, and compiles against the new method in the classes.
+     */
+    @Test
+    void upstreamStateBeyondWhatATaskNeedsIsNotTrusted() throws Exception {
+        MavenBuild build = MavenBuild.checkout(PROJECT, "stale-upstream", "checkout");
+        build.run("package", "-DskipTests");
+
+        Path greeter = build.dir().resolve("lib-core/src/main/java/sample/core/Greeter.java");
+        String source = Files.readString(greeter);
+        Files.writeString(greeter, source.substring(0, source.lastIndexOf('}'))
+                + "\n    public String shout(String name) {\n        return greet(name).toUpperCase();\n    }\n}\n");
+        Path app = build.dir().resolve("app/src/main/java/sample/app/App.java");
+        Files.writeString(app, Files.readString(app).replace("new Greeter().greet(name)", "new Greeter().shout(name)"));
+
+        String compile = "org.apache.maven.plugins:maven-compiler-plugin:3.13.0:compile@default-compile";
+        build.run("-pl", "com.example.samples:lib-core", "-am", "-Dmojoio.only=com.example.samples:lib-core", compile);
+        MavenBuild.Result result = build.run("-pl", "com.example.samples:app", "-am",
+                "-Dmojoio.only=com.example.samples:app", compile);
+        assertFalse(result.log().contains("maven-jar-plugin:jar@default-jar @ lib-core replayed"),
+                "lib-core's packaging state is beyond what compiling app needs\n" + result.log());
+        assertTrue(result.log().contains("maven-compiler-plugin:3.13.0:compile@default-compile @ lib-core replayed"),
+                result.log());
+        assertTrue(Files.isRegularFile(build.dir().resolve("app/target/classes/sample/app/App.class")));
+    }
+
     /** Declarations in the project's .mvn/plugin-io override the built-in ones. */
     @Test
     void projectDeclarationsOverrideBuiltins() throws Exception {

@@ -32,8 +32,8 @@ import org.slf4j.LoggerFactory;
  *   <li>graph export ({@code mojoio.graph.output}): describe the executions, run none;</li>
  *   <li>a project {@code mojoio.only} does not select: run nothing;</li>
  *   <li>otherwise replay the recorded state of what does not run in this build (upstream projects, and
- *       the project's own executions outside the plan), then run each execution and record what it
- *       changed in the project.</li>
+ *       the project's own executions outside the plan), as far as the plan needs it, then run each
+ *       execution and record what it changed in the project.</li>
  * </ol>
  */
 @Named
@@ -100,7 +100,7 @@ public class MojoIoExecutionStrategy implements MojosExecutionStrategy {
         }
         PathNormalizer normalizer = normalizer(session, project);
         if (!config.only().isEmpty()) {
-            replayUpstream(session, project, config);
+            replayUpstream(session, project, executions, config);
         }
         replayOwn(session, project, executions, normalizer);
         for (MojoExecution m : executions) {
@@ -141,32 +141,57 @@ public class MojoIoExecutionStrategy implements MojosExecutionStrategy {
 
     /**
      * Replays {@code project}'s recorded state of the executions that are not in {@code plan} and have
-     * neither run nor been replayed in this build. Maven 3 calls the strategy once per project; Maven 4's
-     * concurrent builder once per lifecycle step, with partial plans.
+     * neither run nor been replayed in this build, through the last phase of the plan. Maven 3 calls the
+     * strategy once per project; Maven 4's concurrent builder once per lifecycle step, with partial plans,
+     * so later calls replay what the later steps need.
      */
     private void replayOwn(MavenSession session, MavenProject project, List<MojoExecution> plan,
                            PathNormalizer normalizer) {
         Map<String, List<StateChange>> applied = applied(session, project);
         Set<String> ran = executed(session, project);
+        // State of phases after the last one in the plan is not this invocation's business. In a shared
+        // workspace it is typically left over from an earlier build (an old jar's artifact file and
+        // attachments, replayed into a compile task).
+        LifecycleModel model = lifecycle(session);
+        int last = -1;
+        boolean known = !plan.isEmpty();
+        for (MojoExecution m : plan) {
+            int index = LifecycleModel.EXECUTION_ORDER.indexOf(String.valueOf(StateFiles.phaseOf(m, project, model)));
+            known &= index >= 0;
+            last = Math.max(last, index);
+        }
+        int through = known ? last : Integer.MAX_VALUE;
         applied.putAll(StateFiles.replayPending(project, plan, normalizer, projectHelper, state -> {
             String identity = StateFiles.identity(state.execution());
-            return !applied.containsKey(identity) && !ran.contains(identity);
+            return !applied.containsKey(identity) && !ran.contains(identity)
+                    && (state.phase() == null || LifecycleModel.EXECUTION_ORDER.indexOf(state.phase()) <= through);
         }));
     }
 
     /**
-     * {@code mojoio.only}: replays the recorded state of the projects {@code project} builds on that this
-     * build does not run. The build system put exactly the outputs of the tasks this one depends on in
-     * place, so every state file there is one to replay.
+     * {@code mojoio.only}: replays the state of the projects {@code project} builds on that this build does
+     * not run, each through the phase {@code plan} needs it at (see UpstreamState). Projects it does not
+     * depend on (parents) are replayed fully.
      */
-    private synchronized void replayUpstream(MavenSession session, MavenProject project, MojoIoConfig config) {
+    private synchronized void replayUpstream(MavenSession session, MavenProject project, List<MojoExecution> plan,
+                                             MojoIoConfig config) {
+        LifecycleModel model = lifecycle(session);
+        Map<String, String> limits = UpstreamState.limits(model, session, project, plan);
+        Set<String> dependencies = UpstreamState.reactorDependencies(session, project);
         for (MavenProject upstream : session.getProjectDependencyGraph().getUpstreamProjects(project, true)) {
             if (config.runs(upstream)) {
                 continue;
             }
+            String id = id(upstream);
+            String limit = limits.get(id);
+            if (limit == null && dependencies.contains(id)) {
+                continue; // a dependency nothing in the plan needs
+            }
+            Set<String> through = limit == null ? null : model.doneBy(limit);
             Map<String, List<StateChange>> applied = applied(session, upstream);
             applied.putAll(StateFiles.replayPending(upstream, List.of(), normalizer(session, upstream), projectHelper,
-                    state -> !applied.containsKey(StateFiles.identity(state.execution()))));
+                    state -> !applied.containsKey(StateFiles.identity(state.execution()))
+                            && (through == null || state.phase() == null || through.contains(state.phase()))));
         }
     }
 

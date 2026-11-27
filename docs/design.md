@@ -54,10 +54,10 @@ takes from the task's sandbox.
 
 ### What the build system owns
 
-The extension trusts the files it finds: every state file in a task's input root is replayed. That
-holds because the build system runs each task in a fresh input root with only the task's declared
-inputs and the outputs of its `dependsOn`, checks the task's writes against its declared outputs and
-caches the result. The recipe is in the
+The build system runs each task, checks the task's writes against its declared outputs and caches
+the result; ideally in a fresh input root with only the task's declared inputs and the outputs of its
+`dependsOn`. The extension replays only state within what the task's `dependsOn` covers, so a shared
+workspace with outputs of later tasks from an earlier build is safe too. The recipe is in the
 [task graph](task-graph.md#caching-maven-tasks-in-a-build-system).
 
 ### Hooks

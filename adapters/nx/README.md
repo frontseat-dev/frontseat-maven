@@ -35,11 +35,6 @@ invocations. It's an *adapter*: nothing in mojo-io knows about Nx.
 
 ## Limits
 
-- **Targets run in the workspace, not in a fresh input root.** mojo-io expects each task to see only
-  its declared inputs and the outputs of the tasks it depends on, and replays every state file it
-  finds. In a workspace where a later target of an upstream project ran before (`package` left a jar
-  and its state next to the classes), an earlier target can pick up that state. Run targets in Nx's
-  sandbox where available, or start from a clean `target/` after changing an upstream project.
 - **External dependencies count by coordinates.** A SNAPSHOT dependency from outside the workspace
   that was re-resolved under the same version doesn't change a target's hash.
 - **The graph is cached** on the POMs, `.mvn/` (extensions, `maven.config`, `jvm.config`, `plugin-io/`),

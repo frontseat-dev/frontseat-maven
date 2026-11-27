@@ -27,7 +27,7 @@ change property argLine -javaagent%3A%40%40M2REPO%40%40%2F...%3Ddestfile%3D%40%4
 | Line | Meaning |
 |---|---|
 | `execution <id>` | `groupId:artifactId:version:goal@executionId` |
-| `phase <name>` | The lifecycle phase the execution is bound to, as a phase of the Maven 4 tree (`compile`, `test`, `package`, …). Absent for an execution bound to none. |
+| `phase <name>` | The lifecycle phase the execution is bound to, as a phase of the Maven 4 tree (`compile`, `test`, `package`, …). Replay uses it to leave out state beyond what a task needs. Absent for an execution bound to none. |
 | `change compileSourceRoot <_> <path>` | Added a main source root. |
 | `change testCompileSourceRoot <_> <path>` | Added a test source root. |
 | `change property <name> <value>` | Set a project property. |
@@ -47,11 +47,23 @@ jar), the state file isn't replayed, and the build log says which file is missin
 
 - **When:** before a project's executions run, at most once per execution and build.
 - **Own state:** the state of every recorded execution of the project that isn't in this build's
-  plan for it and hasn't run in this build. Executions in the plan run and record their own state.
-- **Upstream state with `mojoio.only`:** the projects that aren't selected run nothing. When a selected
-  project starts, every complete state file of its upstream projects is replayed. This relies on the
-  build system's sandbox: it holds exactly the outputs of the tasks the task depends on, so there is no
-  state of a later or an earlier build to leave out.
+  plan for it and hasn't run in this build, through the last phase of the plan (all of it if a phase
+  of the plan is unknown). Compiling doesn't replay what packaging recorded. Executions in the plan
+  run and record their own state.
+- **Upstream state with `mojoio.only`:** the projects that aren't selected run nothing. Their state is
+  replayed when a selected project starts, and only **through the phase that project's mojos need them
+  at**, by the same rules as the task graph's `dependsOn`:
+  - compiling or testing needs a dependency through `ready` (its compiled classes);
+  - packaging needs runtime dependencies through `package`;
+  - a dependency on an attached artifact or an archive (a classifier, `test-jar`, `war`, …) needs
+    `package`;
+  - a plugin, or plugin dependency, built in the reactor needs `package`;
+  - where code runs (runtime and test scopes), the runtime dependencies of dependencies come along.
+
+  State beyond that isn't trusted: in a shared workspace it can be left over from an earlier build (an
+  old jar next to freshly compiled classes), or be rewritten at that moment by a task running in
+  parallel. A dependency no mojo of the plan needs isn't replayed; projects the selected one doesn't
+  depend on (its parents) are replayed fully.
 - **Order:** files are applied in file-name order. The changes of different executions are expected
   to be independent.
 - **Maven 4's concurrent builder** calls the extension once per lifecycle step. An execution whose

@@ -112,8 +112,7 @@ things:
 
 - **A fresh input root per task.** Each task runs in a sandbox that holds only the task's declared
   inputs (with `poms`, `loadFiles` and `.mvn/`) and the outputs of the tasks in its `dependsOn`,
-  transitively. Nothing an earlier build left behind is there, so every state file in it is one to
-  replay.
+  transitively.
 - **The write check.** After a task, the build system compares the sandbox with the task's declared
   outputs: a file written outside the outputs, the observed outputs, the `ignoredWrites` and the
   state files is an undeclared write, and the task's result must not be cached. Maven itself writes
@@ -144,10 +143,12 @@ All it needs is in the graph:
    - `mojoio.only` makes sure only this project's mojos run. If the build ends without failing and
      without building a selected project, the extension fails it (and leaves
      `target/mojo-io/not-built` in that project): an empty result must never be cached as a success.
-   - The extension replays the recorded state of everything that doesn't run: every complete state
-     file of the upstream projects, and the project's own state files of executions outside the
-     invocation. That restores artifact files, attachments, generated source roots and properties
-     like JaCoCo's `argLine`.
+   - The extension replays the recorded state of everything that doesn't run: artifact files,
+     attachments, generated source roots, properties like JaCoCo's `argLine`. It only trusts state
+     within what the task's `dependsOn` covers: an upstream project's state through the phase the
+     task needs it at, the project's own state through the task's last phase. So a shared workspace
+     that holds outputs of later tasks from an earlier build (an old jar) is safe too
+     ([replay rules](state-format.md#replay-rules)).
 
 Fingerprints include stamp values such as the project version as they are, because a build system
 restores outputs byte for byte: a version bump changes the fingerprint of every execution whose
