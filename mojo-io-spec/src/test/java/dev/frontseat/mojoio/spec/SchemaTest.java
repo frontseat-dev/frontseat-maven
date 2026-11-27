@@ -26,7 +26,7 @@ class SchemaTest {
         validate("""
                 <plugin-io xmlns="urn:mojo-io:plugin-io:1.0">
                   <plugin>
-                    <mojo goal="a" prerequisitePhase="compile" stamping="carry">
+                    <mojo goal="a" stamping="carry">
                       <inputs>
                         <files parameter="p"/><files expression="${project.file}"/><classpath parameter="c" excludeParameter="o"/><testClasspath/>
                         <resources parameter="r"/><projectProperty nameParameter="n" defaultName="argLine"/>

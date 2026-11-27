@@ -47,8 +47,7 @@ public class Bench {
         Path cache = work.resolve("cache");
         List<String> ext = List.of("-Dmaven.ext.class.path=" + extensionClasspath(work), "-Dmojoio.cache.dir=" + cache);
         String last = String.format("bench:m%02d", modules - 1);
-        List<String> task = List.of("-pl", last, "-am", "-Dmojoio.only=" + last, "-Dmojoio.cache.enabled=false",
-                "-Dmojoio.prerequisites=false", "org.apache.maven.plugins:maven-surefire-plugin:3.5.2:test@default-test");
+        List<String> task = List.of("-pl", last, "-am", "-Dmojoio.only=" + last, "-Dmojoio.cache.enabled=false", "org.apache.maven.plugins:maven-surefire-plugin:3.5.2:test@default-test");
         Path source = proj.resolve("m00/src/main/java/bench/m00/C5.java");
 
         List<String[]> tools = new ArrayList<>();

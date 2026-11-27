@@ -114,7 +114,7 @@ final class ReferenceBuildSystem {
                 List<String> projects = new ArrayList<>(List.of(id));
                 project.path("reactorReferences").forEach(r -> projects.add(r.asText()));
                 List<String> args = new ArrayList<>(List.of("-pl", String.join(",", projects), "-am",
-                        "-Dmojoio.only=" + id, "-Dmojoio.cache.enabled=false", "-Dmojoio.prerequisites=false"));
+                        "-Dmojoio.only=" + id, "-Dmojoio.cache.enabled=false"));
                 task.executions().forEach(e -> args.add(e.get("invocation").asText()));
                 MavenBuild.Result result = maven.at(sandbox).runAllowingFailure(args.toArray(String[]::new));
                 if (result.exitCode() != 0) {

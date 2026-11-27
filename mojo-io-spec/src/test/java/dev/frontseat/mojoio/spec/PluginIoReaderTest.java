@@ -21,7 +21,7 @@ class PluginIoReaderTest {
     private static final String DOC = """
             <plugin-io xmlns="urn:mojo-io:plugin-io:1.0">
               <plugin groupId="org.example" artifactId="gen-maven-plugin">
-                <mojo goal="generate" prerequisitePhase="initialize" stamping="carry">
+                <mojo goal="generate" stamping="carry">
                   <inputs>
                     <files parameter="schemaDirectory"/>
                     <classpath parameter="pluginClasspath" excludeParameter="outputDirectory"/>
@@ -45,7 +45,6 @@ class PluginIoReaderTest {
 
         MojoIo generate = plugin.mojo("generate").orElseThrow();
         assertTrue(generate.cacheable());
-        assertEquals("initialize", generate.prerequisitePhase());
         assertEquals(List.of("files", "classpath"), generate.inputs().stream().map(IoDeclaration::kind).toList());
         assertEquals("outputDirectory", generate.inputs().get(1).required("excludeParameter"));
         assertEquals("**/*.java", generate.outputs().get(0).required("includes"));

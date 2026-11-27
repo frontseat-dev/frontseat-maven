@@ -44,45 +44,6 @@ class BasicMultimoduleIT {
                 Files.readString(build.dir().resolve("lib-core/target/classes/greeting.properties")));
     }
 
-    /**
-     * The first-slice acceptance test: on a fresh checkout (at a different path than the one that
-     * filled the cache), {@code mvn surefire:test} restores compile and JaCoCo from the cache and then
-     * runs the tests with the agent attached.
-     */
-    @Test
-    void surefireTestOnFreshCheckoutRestoresPrerequisitesAndRunsWithAgent() throws Exception {
-        Path cache = MavenBuild.cacheDir("acceptance");
-        MavenBuild.checkout(PROJECT, "acceptance", "first", cache).run("test-compile");
-
-        MavenBuild fresh = MavenBuild.checkout(PROJECT, "acceptance", "second", cache);
-        MavenBuild.Result result = fresh.run("surefire:test");
-
-        for (String module : MODULES) {
-            for (String goal : COMPILE_GOALS) {
-                assertEquals("HIT", result.outcome(module, goal), module + " " + goal + "\n" + result.log());
-            }
-            assertEquals("MISS", result.outcome(module, "surefire:test"), result.log());
-            // The agent path restored from the cache was relocated to this checkout and actually used.
-            Path exec = fresh.dir().resolve(module + "/target/jacoco.exec");
-            assertTrue(Files.size(exec) > 0, "jacoco.exec missing for " + module);
-            assertTrue(Files.isRegularFile(fresh.dir().resolve(module + "/target/surefire-reports")
-                    .resolve("TEST-sample." + (module.equals("app") ? "app.AppTest" : "core.GreeterTest") + ".xml")));
-        }
-        assertTrue(result.log().contains("Tests run: 2, Failures: 0"), result.log());
-        // surefire is configured with @{argLine}: the key must see the agent JaCoCo put there.
-        String surefireKey = Files.readString(fresh.dir().resolve(
-                "lib-core/target/mojo-io/maven-surefire-plugin-test-default-cli.key.txt"));
-        assertTrue(surefireKey.contains("-javaagent:@@M2REPO@@/org/jacoco"), surefireKey);
-
-        // Unchanged inputs: the tests themselves now come from the cache.
-        MavenBuild.Result again = fresh.run("surefire:test");
-        assertEquals(0, again.count("MISS"), again.log());
-        for (String module : MODULES) {
-            assertEquals("HIT", again.outcome(module, "surefire:test"), again.log());
-        }
-        assertFalse(again.log().contains("T E S T S"), "tests should not have run again");
-    }
-
     @Test
     void sourceChangeInvalidatesTheModuleAndItsDependents() throws Exception {
         Path cache = MavenBuild.cacheDir("invalidate");

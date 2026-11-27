@@ -29,7 +29,7 @@ import org.xml.sax.SAXException;
  * <pre>{@code
  * <plugin-io xmlns="urn:mojo-io:plugin-io:1.0">
  *   <plugin groupId="org.apache.maven.plugins" artifactId="maven-compiler-plugin">
- *     <mojo goal="compile" prerequisitePhase="process-resources">
+ *     <mojo goal="compile">
  *       <inputs>
  *         <files parameter="compileSourceRoots"/>
  *         <classpath parameter="compilePath" excludeParameter="outputDirectory"/>
@@ -120,7 +120,7 @@ public final class PluginIoReader {
         Set<String> ignoredWrites = list(mojo, "ignoredWrites");
         try {
             return new MojoIo(goal, cacheable == null || Boolean.parseBoolean(cacheable), attr(mojo, "reason"),
-                    attr(mojo, "prerequisitePhase"), declarations(mojo, "inputs"), declarations(mojo, "outputs"),
+                    declarations(mojo, "inputs"), declarations(mojo, "outputs"),
                     ignored, ignoredWrites, "carry".equals(attr(mojo, "stamping")));
         } catch (PluginIoException e) {
             throw new PluginIoException(source + ": " + e.getMessage(), e);

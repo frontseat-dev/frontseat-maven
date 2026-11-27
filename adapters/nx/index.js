@@ -252,7 +252,6 @@ function targetsFor(project, graph, names, options) {
     const projectList = [project.id, ...(project.reactorReferences || [])].join(',');
     const invocation = [maven, ...baseArgs(maven), '-B', '--no-transfer-progress', '-pl', projectList, '-am',
       `-Dmojoio.only=${project.id}`, ...(options && options.innerCache ? [] : ['-Dmojoio.cache.enabled=false']),
-      '-Dmojoio.prerequisites=false',
       // Not read by Maven: makes Nx's hash cover what it cannot hash itself (evaluated configuration,
       // plugin versions, JDK, external dependencies).
       `-Dmojoio.fingerprint=${fingerprint}`,

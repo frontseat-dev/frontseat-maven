@@ -10,8 +10,6 @@ import java.util.Set;
  * @param cacheable         {@code false} when the mojo has effects that cannot be captured
  *                          (system properties, static state, the session, files outside the project)
  * @param reason            why it is not cacheable; required when {@code cacheable} is false
- * @param prerequisitePhase lifecycle phase that must have run before this goal when it is invoked
- *                          directly (e.g. {@code process-test-classes} for {@code surefire:test})
  * @param inputs            declared inputs; parameters they cover are hashed by content
  * @param outputs           declared outputs
  * @param ignoredParameters parameters that cannot affect outputs (logging, process plumbing)
@@ -22,7 +20,7 @@ import java.util.Set;
  *                          build numbers) into its outputs, so they are excluded from the key and
  *                          rewritten on restore; otherwise ({@code exact}) they stay in the key
  */
-public record MojoIo(String goal, boolean cacheable, String reason, String prerequisitePhase,
+public record MojoIo(String goal, boolean cacheable, String reason,
                      List<IoDeclaration> inputs, List<IoDeclaration> outputs, Set<String> ignoredParameters,
                      Set<String> ignoredWrites, boolean stampingCarry) {
 

@@ -52,7 +52,6 @@
     <!-- Required when cacheable="false". -->
     <xs:attribute name="reason" type="xs:string"/>
     <!-- Phase that must have run before this goal when it is invoked directly. -->
-    <xs:attribute name="prerequisitePhase" type="xs:string"/>
     <!-- How the mojo treats stamp values (project version, build numbers):
          exact (default): it may act on them, so they stay in the cache key;
          carry: it only copies them into outputs (compilers, resource filtering, archivers), so they

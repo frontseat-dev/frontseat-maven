@@ -7,8 +7,7 @@ import java.util.Set;
 
 /**
  * Executable form of a plugin-io declaration: how one plugin goal is cached: which inputs go into the key, which files are its outputs,
- * which configuration parameters to leave out of the configuration hash, and which lifecycle phase it
- * needs to have run before it when invoked directly from the command line.
+ * which configuration parameters to leave out of the configuration hash.
  *
  * <p>The effective configuration is always hashed, so inputs only need to cover what the configuration
  * hash cannot see: the <em>content</em> of files and directories it points at.
@@ -29,7 +28,6 @@ public final class MojoCacheDescriptor {
     private final List<InputSpec> inputs;
     private final List<OutputSpec> outputs;
     private final Set<String> ignoredParameters;
-    private final String prerequisitePhase;
     private final String source;
     private final boolean stampingCarry;
     private final List<String> ignoredWrites;
@@ -48,7 +46,6 @@ public final class MojoCacheDescriptor {
         Set<String> ignored = new LinkedHashSet<>(ALWAYS_IGNORED);
         ignored.addAll(b.ignored);
         this.ignoredParameters = Set.copyOf(ignored);
-        this.prerequisitePhase = b.prerequisitePhase;
     }
 
     public static Builder forGoal(String groupId, String artifactId, String goal) {
@@ -109,18 +106,12 @@ public final class MojoCacheDescriptor {
         return source;
     }
 
-    /** Lifecycle phase to run first when this goal is invoked directly, or {@code null}. */
-    public String prerequisitePhase() {
-        return prerequisitePhase;
-    }
-
     private Builder copy() {
         Builder b = new Builder(pluginKey, goal);
         b.notCacheableReason = notCacheableReason;
         b.inputs.addAll(inputs);
         b.outputs.addAll(outputs);
         b.ignored.addAll(ignoredParameters);
-        b.prerequisitePhase = prerequisitePhase;
         b.source = source;
         b.stampingCarry = stampingCarry;
         b.ignoredWrites.addAll(ignoredWrites);
@@ -150,7 +141,6 @@ public final class MojoCacheDescriptor {
         private final List<InputSpec> inputs = new ArrayList<>();
         private final List<OutputSpec> outputs = new ArrayList<>();
         private final Set<String> ignored = new LinkedHashSet<>();
-        private String prerequisitePhase;
         private String source = "code";
         private boolean stampingCarry;
         private final List<String> ignoredWrites = new ArrayList<>();
@@ -197,11 +187,6 @@ public final class MojoCacheDescriptor {
 
         public Builder source(String source) {
             this.source = source;
-            return this;
-        }
-
-        public Builder prerequisitePhase(String phase) {
-            this.prerequisitePhase = phase;
             return this;
         }
 

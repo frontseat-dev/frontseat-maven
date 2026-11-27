@@ -61,7 +61,6 @@ public class MojoIoExecutionStrategy implements MojosExecutionStrategy {
 
     private final DescriptorRegistry registry;
     private final DependencyResolution dependencyResolution;
-    private final PrerequisiteExpander prerequisites;
     private final TaskGraphCollector graph;
     private final org.apache.maven.project.MavenProjectHelper projectHelper;
     /**
@@ -169,12 +168,11 @@ public class MojoIoExecutionStrategy implements MojosExecutionStrategy {
 
     @Inject
     public MojoIoExecutionStrategy(DescriptorRegistry registry, DependencyResolution dependencyResolution,
-                                   PrerequisiteExpander prerequisites, TaskGraphCollector graph,
+                                   TaskGraphCollector graph,
                                    org.apache.maven.project.MavenProjectHelper projectHelper) {
         this.projectHelper = projectHelper;
         this.registry = registry;
         this.dependencyResolution = dependencyResolution;
-        this.prerequisites = prerequisites;
         this.graph = graph;
     }
 
@@ -195,25 +193,22 @@ public class MojoIoExecutionStrategy implements MojosExecutionStrategy {
             graph.add(session, project, executions); // dry run: describe, run nothing
             return;
         }
-        List<MojoExecution> plan = config.prerequisites()
-                ? prerequisites.expand(executions, session, project)
-                : executions;
         PathNormalizer normalizer = normalizer(session, project).withStamps(StampValues.of(session, project));
         if (!config.runs(project)) {
             // Only here so others can resolve it: it runs nothing. Its recorded state is replayed when a
             // selected project starts, through the phase that project needs it at (see UpstreamState).
             LOG.info(PREFIX + "ONLY  {} not selected by mojoio.only: {} execution(s) not run", project.getArtifactId(),
-                    plan.size());
+                    executions.size());
             return;
         }
         if (config.state()) {
             if (!config.only().isEmpty()) {
-                replayUpstream(session, project, plan, config);
+                replayUpstream(session, project, executions, config);
             }
-            replayOwn(session, project, plan, normalizer);
+            replayOwn(session, project, executions, normalizer);
         }
         LocalCache cache = config.cache() ? new LocalCache(config.cacheDir()) : null;
-        for (MojoExecution m : plan) {
+        for (MojoExecution m : executions) {
             executeOne(m, session, project, runner, cache, config, normalizer);
         }
     }

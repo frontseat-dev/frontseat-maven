@@ -126,7 +126,7 @@ check(restored.ran.length === 0, `fresh checkout + shared remote cache: all ${re
 check(fingerprint(b, modules) === reference, 'fresh checkout: restored outputs identical to raw `mvn verify`');
 
 // Continue the build on restored outputs: Maven needs the replayed state (artifact files, argLine).
-const cont = sh(`${maven} -B -q -pl com.example.samples:app -am -Dmojoio.only=com.example.samples:app -Dmojoio.cache.enabled=false -Dmojoio.prerequisites=false org.apache.maven.plugins:maven-surefire-plugin:3.5.2:test@default-test`, b);
+const cont = sh(`${maven} -B -q -pl com.example.samples:app -am -Dmojoio.only=com.example.samples:app -Dmojoio.cache.enabled=false org.apache.maven.plugins:maven-surefire-plugin:3.5.2:test@default-test`, b);
 check(fs.statSync(path.join(b, 'app/target/jacoco.exec')).size > 0, 'restored checkout continues with plain Maven: app tests run with the JaCoCo agent (replayed argLine)');
 
 // Change a lib-core test: Maven 4 phase links keep app's compile and test cached.

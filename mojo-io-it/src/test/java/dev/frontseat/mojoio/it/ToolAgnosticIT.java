@@ -38,7 +38,7 @@ class ToolAgnosticIT {
 
         MavenBuild b = MavenBuild.checkout(PROJECT, "restore-target", "b", cache);
         b.copyTargetsFrom(a, "lib-core", "app");
-        MavenBuild.Result result = b.run("surefire:test", NO_CACHE, "-Dmojoio.prerequisites=false");
+        MavenBuild.Result result = b.run("surefire:test", NO_CACHE);
         assertTrue(result.log().contains("[mojo-io] STATE org.jacoco:jacoco-maven-plugin"), result.log());
         assertFalse(result.log().contains("maven-compiler-plugin:3.13.0:compile ("), "compile must not run again");
         for (String module : List.of("lib-core", "app")) {
@@ -49,7 +49,7 @@ class ToolAgnosticIT {
         // Control: the same restore without state replay cannot continue the build.
         MavenBuild c = MavenBuild.checkout(PROJECT, "restore-target", "c", cache);
         c.copyTargetsFrom(a, "lib-core", "app");
-        MavenBuild.Result control = c.runAllowingFailure("surefire:test", NO_CACHE, "-Dmojoio.prerequisites=false",
+        MavenBuild.Result control = c.runAllowingFailure("surefire:test", NO_CACHE,
                 "-Dmojoio.state.enabled=false");
         assertTrue(control.exitCode() != 0 || !Files.exists(c.dir().resolve("lib-core/target/jacoco.exec")),
                 "without state replay the restored build should lose project state\n" + control.log());
@@ -70,7 +70,7 @@ class ToolAgnosticIT {
         MavenBuild.deleteTree(installed);
         MavenBuild b = MavenBuild.checkout(PROJECT, "restore-install", "b", cache);
         b.copyTargetsFrom(a, "lib-core", "app");
-        MavenBuild.Result result = b.run("install:install", NO_CACHE, "-Dmojoio.prerequisites=false");
+        MavenBuild.Result result = b.run("install:install", NO_CACHE);
         assertFalse(result.log().contains("maven-jar-plugin:3.4.2:jar ("), "nothing is re-packaged");
         for (String suffix : List.of(".jar", "-tests.jar", "-sources.jar", ".pom")) {
             assertTrue(Files.isRegularFile(installed.resolve("lib-core-1.0.0-SNAPSHOT" + suffix)),
@@ -97,10 +97,9 @@ class ToolAgnosticIT {
         Files.writeString(app, Files.readString(app).replace("new Greeter().greet(name)", "new Greeter().shout(name)"));
 
         String compile = "org.apache.maven.plugins:maven-compiler-plugin:3.13.0:compile@default-compile";
-        build.run("-pl", "com.example.samples:lib-core", "-am", "-Dmojoio.only=com.example.samples:lib-core", NO_CACHE,
-                "-Dmojoio.prerequisites=false", compile);
+        build.run("-pl", "com.example.samples:lib-core", "-am", "-Dmojoio.only=com.example.samples:lib-core", NO_CACHE, compile);
         MavenBuild.Result result = build.run("-pl", "com.example.samples:app", "-am",
-                "-Dmojoio.only=com.example.samples:app", NO_CACHE, "-Dmojoio.prerequisites=false", compile);
+                "-Dmojoio.only=com.example.samples:app", NO_CACHE, compile);
         assertFalse(result.log().contains("maven-jar-plugin:jar@default-jar @ lib-core replayed"),
                 "lib-core's packaging state is beyond what compiling app needs\n" + result.log());
         assertTrue(result.log().contains("maven-compiler-plugin:3.13.0:compile@default-compile @ lib-core replayed"),

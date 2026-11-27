@@ -34,9 +34,6 @@ final class PluginIoMapper {
             return b.notCacheable(e.getMessage() + " (in " + source + ")").build();
         }
         io.ignoredParameters().forEach(b::ignore);
-        if (io.prerequisitePhase() != null) {
-            b.prerequisitePhase(io.prerequisitePhase());
-        }
         return b.build();
     }
 
