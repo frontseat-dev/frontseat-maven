@@ -139,11 +139,6 @@ final class LifecycleModel {
         };
     }
 
-    /** The phases of the default lifecycle in the order a project goes through them. */
-    static final List<String> EXECUTION_ORDER = List.of("validate", "initialize", "sources", "resources", "compile",
-            "ready", "test-sources", "test-resources", "test-compile", "test", "package", "integration-test", "verify",
-            "install", "deploy");
-
     /** Dependency scopes Maven resolves for a mojo's {@code requiresDependencyResolution}. */
     static Set<String> resolutionScopes(String resolution) {
         return switch (resolution) {

@@ -30,7 +30,7 @@ final class CacheKeyCalculator {
         key.add("pluginDependencies", pluginDependencies(m.getPlugin()));
         // A plugin or plugin dependency built in this reactor (a build-tools module): its coordinates
         // say nothing about its content.
-        for (String id : UpstreamState.pluginReactorDependencies(m, ctx.session())) {
+        for (String id : TaskGraphCollector.pluginReactorDependencies(m, ctx.session())) {
             for (org.apache.maven.project.MavenProject p : ctx.session().getAllProjects()) {
                 if (!(p.getGroupId() + ":" + p.getArtifactId()).equals(id)) {
                     continue;

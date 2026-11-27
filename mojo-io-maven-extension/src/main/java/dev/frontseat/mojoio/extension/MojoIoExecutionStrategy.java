@@ -85,9 +85,9 @@ public class MojoIoExecutionStrategy implements MojosExecutionStrategy {
     }
 
     /**
-     * Replays {@code project}'s recorded state that {@code plan} may rely on and that was not applied yet.
-     * Maven 3 calls the strategy once per project; Maven 4's concurrent builder once per lifecycle step,
-     * with partial plans, so later calls replay what the later steps need.
+     * Replays {@code project}'s recorded state of the executions that are not in {@code plan} and have
+     * neither run nor been replayed in this build. Maven 3 calls the strategy once per project; Maven 4's
+     * concurrent builder once per lifecycle step, with partial plans.
      */
     private void replayOwn(MavenSession session, MavenProject project, List<MojoExecution> plan,
                            PathNormalizer normalizer) {
@@ -97,22 +97,9 @@ public class MojoIoExecutionStrategy implements MojosExecutionStrategy {
         Map<String, List<CacheEntry.StateRecord>> applied =
                 projects.computeIfAbsent(id, k -> new java.util.concurrent.ConcurrentHashMap<>());
         Set<String> executed = run(session, project).executed;
-        // State of phases after the last one in the plan is not this invocation's business. In a build
-        // system's workspace it is typically left over from an earlier build (an old jar's artifact
-        // file and attachments, replayed into a compile task).
-        LifecycleModel model = lifecycle(session);
-        int last = -1;
-        boolean known = !plan.isEmpty();
-        for (MojoExecution m : plan) {
-            int index = LifecycleModel.EXECUTION_ORDER.indexOf(String.valueOf(UpstreamState.phaseOf(m, project, model)));
-            known &= index >= 0;
-            last = Math.max(last, index);
-        }
-        int through = known ? last : Integer.MAX_VALUE;
         applied.putAll(StateFiles.replayPending(project, plan, normalizer, projectHelper, state -> {
             String identity = StateFiles.identity(state.execution());
-            return !applied.containsKey(identity) && !executed.contains(identity)
-                    && (state.phase() == null || LifecycleModel.EXECUTION_ORDER.indexOf(state.phase()) <= through);
+            return !applied.containsKey(identity) && !executed.contains(identity);
         }));
     }
 
@@ -137,14 +124,11 @@ public class MojoIoExecutionStrategy implements MojosExecutionStrategy {
     }
 
     /**
-     * {@code mojoio.only}: replays the state of the projects {@code project} builds on, each through
-     * the phase {@code plan} needs it at. Projects it does not depend on (parents) are replayed fully.
+     * {@code mojoio.only}: replays the recorded state of the projects {@code project} builds on that this
+     * build does not run. The build system put exactly the outputs of the tasks this one depends on in
+     * place, so every state file there is one to replay.
      */
-    private synchronized void replayUpstream(MavenSession session, MavenProject project, List<MojoExecution> plan,
-                                             MojoIoConfig config) {
-        LifecycleModel model = lifecycle(session);
-        Map<String, String> limits = UpstreamState.limits(model, session, project, plan);
-        Set<String> dependencies = UpstreamState.reactorDependencies(session, project);
+    private synchronized void replayUpstream(MavenSession session, MavenProject project, MojoIoConfig config) {
         Map<String, Map<String, List<CacheEntry.StateRecord>>> projects =
                 replayedState.computeIfAbsent(session, s -> new java.util.concurrent.ConcurrentHashMap<>());
         for (MavenProject upstream : session.getProjectDependencyGraph().getUpstreamProjects(project, true)) {
@@ -152,17 +136,11 @@ public class MojoIoExecutionStrategy implements MojosExecutionStrategy {
                 continue;
             }
             String id = upstream.getGroupId() + ":" + upstream.getArtifactId();
-            String limit = limits.get(id);
-            if (limit == null && dependencies.contains(id)) {
-                continue; // a dependency nothing in the plan needs
-            }
-            Set<String> through = limit == null ? null : model.doneBy(limit);
             Map<String, List<CacheEntry.StateRecord>> applied =
                     projects.computeIfAbsent(id, k -> new java.util.concurrent.ConcurrentHashMap<>());
             PathNormalizer normalizer = normalizer(session, upstream).withStamps(StampValues.of(session, upstream));
             applied.putAll(StateFiles.replayPending(upstream, List.of(), normalizer, projectHelper,
-                    state -> !applied.containsKey(StateFiles.identity(state.execution()))
-                            && (through == null || state.phase() == null || through.contains(state.phase()))));
+                    state -> !applied.containsKey(StateFiles.identity(state.execution()))));
         }
     }
 
@@ -196,14 +174,14 @@ public class MojoIoExecutionStrategy implements MojosExecutionStrategy {
         PathNormalizer normalizer = normalizer(session, project).withStamps(StampValues.of(session, project));
         if (!config.runs(project)) {
             // Only here so others can resolve it: it runs nothing. Its recorded state is replayed when a
-            // selected project starts, through the phase that project needs it at (see UpstreamState).
+            // selected project starts.
             LOG.info(PREFIX + "ONLY  {} not selected by mojoio.only: {} execution(s) not run", project.getArtifactId(),
                     executions.size());
             return;
         }
         if (config.state()) {
             if (!config.only().isEmpty()) {
-                replayUpstream(session, project, executions, config);
+                replayUpstream(session, project, config);
             }
             replayOwn(session, project, executions, normalizer);
         }
@@ -247,7 +225,7 @@ public class MojoIoExecutionStrategy implements MojosExecutionStrategy {
                 }
                 if (entry.isPresent() && restore(entry.get(), ctx, normalizer, cache, label, key.hash())) {
                     if (config.state()) {
-                        StateFiles.record(project, m, entry.get().state(), null, UpstreamState.phaseOf(m, project, lifecycle(session)));
+                        StateFiles.record(project, m, entry.get().state(), null, StateFiles.phaseOf(m, project, lifecycle(session)));
                     }
                     return;
                 }
@@ -269,7 +247,7 @@ public class MojoIoExecutionStrategy implements MojosExecutionStrategy {
         }
         if (config.state()) {
             StateFiles.record(project, m, state == null ? List.of() : state, incomplete,
-                    UpstreamState.phaseOf(m, project, lifecycle(session)));
+                    StateFiles.phaseOf(m, project, lifecycle(session)));
         }
         if (key != null) {
             store(m, ctx, normalizer.stamps(), cache, config, descriptor.get(), key, state, incomplete, label);

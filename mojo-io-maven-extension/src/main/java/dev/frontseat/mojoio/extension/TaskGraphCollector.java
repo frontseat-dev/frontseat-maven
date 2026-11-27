@@ -144,6 +144,36 @@ public class TaskGraphCollector {
         LOG.info("[mojo-io] GRAPH {}: {} execution(s) described, none run", project.getArtifactId(), list.size());
     }
 
+    /**
+     * Reactor projects a mojo's plugin is made of: the plugin itself, when it is built in this reactor,
+     * and its {@code <dependencies>} (for example a build-tools module holding a checkstyle
+     * configuration). Maven loads them as packaged artifacts.
+     */
+    static List<String> pluginReactorDependencies(MojoExecution m, MavenSession session) {
+        Set<String> reactor = new java.util.HashSet<>();
+        session.getAllProjects().forEach(p -> reactor.add(p.getGroupId() + ":" + p.getArtifactId()));
+        List<String> ids = new java.util.ArrayList<>();
+        if (reactor.contains(m.getGroupId() + ":" + m.getArtifactId())) {
+            ids.add(m.getGroupId() + ":" + m.getArtifactId());
+        }
+        if (m.getPlugin() != null && m.getPlugin().getDependencies() != null) {
+            for (org.apache.maven.model.Dependency d : m.getPlugin().getDependencies()) {
+                String id = d.getGroupId() + ":" + d.getArtifactId();
+                if (reactor.contains(id) && !ids.contains(id)) {
+                    ids.add(id);
+                }
+            }
+        }
+        for (MojoExecution fork : ForkedGoals.of(m)) {
+            for (String id : pluginReactorDependencies(fork, session)) {
+                if (!ids.contains(id)) {
+                    ids.add(id);
+                }
+            }
+        }
+        return ids;
+    }
+
     /** Reactor projects other than {@code project} named by coordinates in its build plugins' configuration. */
     static List<String> configurationReferences(MavenProject project, java.util.Set<String> reactorIds) {
         java.util.Set<String> found = new java.util.LinkedHashSet<>();
@@ -221,7 +251,7 @@ public class TaskGraphCollector {
         String resolution = ForkedGoals.resolution(m);
         e.put("requiresDependencyResolution", resolution == null || resolution.isBlank() ? null : resolution);
         // Plugins and plugin dependencies built in this reactor: needed packaged before the mojo runs.
-        e.put("pluginReactorDependencies", UpstreamState.pluginReactorDependencies(m, session));
+        e.put("pluginReactorDependencies", pluginReactorDependencies(m, session));
         // Invoked as a goal, Maven runs an aggregator once, for the build's top-level project, whatever
         // project it is bound in.
         e.put("aggregator", m.getMojoDescriptor() != null && m.getMojoDescriptor().isAggregator());

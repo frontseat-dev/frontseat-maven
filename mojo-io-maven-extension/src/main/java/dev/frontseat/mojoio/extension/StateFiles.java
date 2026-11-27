@@ -86,6 +86,27 @@ final class StateFiles {
         return gav.length == 4 ? gav[0] + ":" + gav[1] + ":" + gav[3] + "@" + at[1] : executionId;
     }
 
+    /** The lifecycle phase (Maven 4 tree) an execution is bound to, or {@code null}. */
+    static String phaseOf(MojoExecution m, MavenProject project, LifecycleModel model) {
+        String phase = m.getLifecyclePhase();
+        if (phase == null) {
+            // Invoked directly (goal@execution): the binding is in the project's model.
+            for (org.apache.maven.model.Plugin plugin : project.getBuildPlugins()) {
+                if (plugin.getGroupId().equals(m.getGroupId()) && plugin.getArtifactId().equals(m.getArtifactId())) {
+                    for (org.apache.maven.model.PluginExecution e : plugin.getExecutions()) {
+                        if (e.getId().equals(m.getExecutionId()) && e.getGoals().contains(m.getGoal())) {
+                            phase = e.getPhase();
+                        }
+                    }
+                }
+            }
+        }
+        if (phase == null && m.getMojoDescriptor() != null) {
+            phase = m.getMojoDescriptor().getPhase();
+        }
+        return phase == null || phase.isBlank() ? null : model.treePhase(phase);
+    }
+
     static void record(MavenProject project, MojoExecution m, List<CacheEntry.StateRecord> records,
                        String incompleteReason, String phase) {
         List<StateChange> changes = new ArrayList<>();
